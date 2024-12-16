@@ -172,7 +172,7 @@ module.exports = function (app) {
     function substract(speed1, speed2) {
       const a = toVector(speed1);
       const b = toVector(speed2);
-      return { x: a.x - b.x, y: a.y - b.y };
+      return {x: a.x -b.x, y: a.y - b.y};
     }
 
     function add(speed1, speed2) {
@@ -194,7 +194,7 @@ module.exports = function (app) {
     function rotate1D(v, angle) {
       const p = toPolar(v);
       const newAngle = ((p.angle + angle + Math.PI) % (2 * Math.PI)) - Math.PI;
-      return { speed: p.speed, angle: newAngle };
+            return {speed: p.speed, angle: newAngle};
     }
 
 
@@ -351,6 +351,7 @@ module.exports = function (app) {
     function processDeltas(timestamp) {
       // delta windspeed serves as a trigger for calculations;
       const calc = initSteps(timestamp);
+      const values = [];
       wind = addWind(calc, "Measured wind speed", Object.assign({}, apparentWind));
       boat = addBoat(calc, "Measured boat speed", Object.assign({}, boatSpeed));
       ground = addBoat(calc, "Measured ground speed", Object.assign({}, groundSpeed));
@@ -372,11 +373,12 @@ module.exports = function (app) {
       appWind = addWind(calc, "back calculate apparent wind", add(trueWind, boat));
       if (options.calculateGroundWind)
         groundWind = addWind(calc, "calculate ground wind", substract(rotate1D(appWind, currentAttitude.yaw), addBoat(calc, "speed over ground", groundSpeed)));
-      sendTrueWind(addWind(calc, "dampen true wind", smoothTrue.update(trueWind, timestamp)));
+      sendTrueWind(values, addWind(calc, "dampen true wind", smoothTrue.update(trueWind, timestamp)));
       if (options.backCalculate)
-        sendApparentWind(addWind(calc, "dampen apparent wind", smoothApparent.update(appWind, timestamp)));
+        sendApparentWind(values, addWind(calc, "dampen apparent wind", smoothApparent.update(appWind, timestamp)));
       if (options.calculateGroundWind)
-        sendGroundWind(addWind(calc, "dampen ground wind", smoothGround.update(groundWind, timestamp)));
+        sendGroundWind(values, addWind(calc, "dampen ground wind", smoothGround.update(groundWind, timestamp)));
+      sendDeltas(values);
       Object.assign(previousAttitude, currentAttitude);
       Object.assign(lastCalculation, calc);
     }
@@ -389,7 +391,6 @@ module.exports = function (app) {
     }
 
     // correct for the attitude of the boat and wind sensor
-    // bug in TWA
     function correctForMastHeel(wind, attitude) {
       //return rotate2D(toVector(wind), getRotationMatrix(attitude));
       wind = toVector(wind);
@@ -410,44 +411,43 @@ module.exports = function (app) {
     function normaliseToTen(wind) {
       wind = toVector(wind);
       const factor = Math.pow((10 / options.heightAboveWater), options.windExponent);
-      return {
-        x: wind.x * factor,
-        y: wind.y * factor
-      }
+      wind.x *= factor;
+      wind.y *= factor;
+      return wind;
     }
 
     // calculate leeway and add to boat speed
     function addLeeway(boat, wind, attitude) {
       boat = toPolar(boat);
       wind = toPolar(wind);
-      const leeway = options.leewaySpeed * (boat.speed / wind.speed) + options.leewayAngle * Math.sin(attitude.roll);
-      return {
-        speed: boat.speed,
-        angle: leeway
-      };
+      boat.angle = options.leewaySpeed * (boat.speed / wind.speed) + options.leewayAngle * Math.sin(attitude.roll);
+      return boat;
     }
 
-    function sendMessage(trueWind, appWind, groundWind, boatSpeed) {
-      // not used
+    function sendLeeway(values, boatSpeed) {
+      boatSpeed= toPolar(boatSpeed);
+      values.push({ path: 'environment.wind.directionTruenavigation.leewayAngle', value: boatSpeed.angle });
+    }
+
+    function sendTrueWind(values, trueWind) {
       trueWind = toPolar(trueWind);
+      values.push({ path: 'environment.wind.angleTrueWater', value: trueWind.angle });
+      values.push({ path: 'environment.wind.speedTrue', value: trueWind.speed });
+    }
+
+    function sendApparentWind(values, appWind) {
       appWind = toPolar(appWind);
-      groundWind = toPolar(groundWind);
-      boatSpeed = toPolar(boatSpeed);
-      const values = [
-        { path: 'environment.wind.angleTrueWater', value: trueWind.angle },
-        { path: 'environment.wind.speedTrue', value: trueWind.speed },
-      ];
-      if (options.backCalculate) {
-        values.push({ path: 'environment.wind.angleApparent', value: appWind.angle });
-        values.push({ path: 'environment.wind.speedApparent', value: appWind.speed });
-      }
-      if (options.calculateGroundWind) {
-        values.push({ path: 'environment.wind.directionTrue', value: groundWind.angle });
-        values.push({ path: 'environment.wind.speedOverGround', value: groundWind.speed });
-      }
-      if (options.correctForLeeway) {
-        values.push({ path: 'environment.wind.directionTruenavigation.leewayAngle', value: boatSpeed.angle });
-      }
+      values.push({ path: 'environment.wind.angleApparent', value: appWind.angle });
+      values.push({ path: 'environment.wind.speedApparent', value: appWind.speed });
+    }
+
+    function sendGroundWind(values, wind) {
+      wind=toPolar(wind);
+      values.push({ path: 'environment.wind.directionTrue', value: wind.angle });
+      values.push({ path: 'environment.wind.speedOverGround', value: wind.speed });
+    }
+
+    function sendDeltas(values) {
       const delta = {
         context: 'vessels.self',
         updates: [
@@ -458,64 +458,6 @@ module.exports = function (app) {
             values: values
           }]
       };
-      app.handleMessage(plugin.id, delta);
-    }
-
-    function sendTrueWind(trueWind) {
-      trueWind = toPolar(trueWind);
-
-      const delta = {
-        context: 'vessels.self',
-        updates: [
-          {
-            source: {
-              label: plugin.id
-            },
-            values: [
-              { path: 'environment.wind.angleTrueWater', value: trueWind.angle },
-              { path: 'environment.wind.speedTrue', value: trueWind.speed },
-            ]
-          }]
-      };
-      //app.debug(delta.updates[0]);
-      app.handleMessage(plugin.id, delta);
-    }
-
-    function sendApparentWind(appWind) {
-      appWind = toPolar(appWind);
-      const delta = {
-        context: 'vessels.self',
-        updates: [
-          {
-            source: {
-              label: plugin.id
-            },
-            values: [
-              { path: 'environment.wind.angleApparent', value: appWind.angle },
-              { path: 'environment.wind.speedApparent', value: appWind.speed },
-            ]
-          }]
-      };
-      //app.debug(delta.updates[0]);
-      app.handleMessage(plugin.id, delta);
-    }
-
-    function sendGroundWind(wind) {
-      wind = toPolar(wind);
-      const delta = {
-        context: 'vessels.self',
-        updates: [
-          {
-            source: {
-              label: plugin.id
-            },
-            values: [
-              { path: 'environment.wind.directionTrue', value: wind.angle },
-              { path: 'environment.wind.speedOverGround', value: wind.speed },
-            ]
-          }]
-      };
-      //app.debug(delta.updates[0]);
       app.handleMessage(plugin.id, delta);
     }
 
