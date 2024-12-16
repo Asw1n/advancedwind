@@ -510,8 +510,8 @@ module.exports = function (app) {
               label: plugin.id
             },
             values: [
-              { path: 'environment/wind/directionTrue', value: wind.angle },
-              { path: 'environment/wind/speedOverGround', value: wind.speed },
+              { path: 'environment.wind.directionTrue', value: wind.angle },
+              { path: 'environment.wind.speedOverGround', value: wind.speed },
             ]
           }]
       };
