@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vector Visualization</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 0;
+      padding: 0;
+    }
+
+    svg {
+      border: 1px solid #ccc;
+      margin-top: 20px;
+      background-color: #f9f9f9;
+    }
+
+    .label {
+      font-size: 12px;
+      text-anchor: middle;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Vector Visualization</h1>
+  <div id="vector-container"></div>
+
+  <script>
+    // Example data
+    const vectorData = [
+      { label: "Apparent Wind", value: { speed: 15, angle: 45 }, type: "wind" },
+      { label: "True Wind", value: { speed: 10, angle: 90 }, type: "wind" },
+      { label: "Boat Speed", value: { speed: 5, angle: 180 }, type: "other" }
+    ];
+
+    function drawVectors(data) {
+      // SVG Canvas Dimensions
+      const width = 400;
+      const height = 400;
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const scale = 10; // Scaling factor for speed to pixel length
+
+      // Create SVG Element
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("width", width);
+      svg.setAttribute("height", height);
+
+      // Draw Origin
+      const origin = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      origin.setAttribute("cx", centerX);
+      origin.setAttribute("cy", centerY);
+      origin.setAttribute("r", 3);
+      origin.setAttribute("fill", "black");
+      svg.appendChild(origin);
+
+      // Draw Vectors
+      data.forEach(vector => {
+        const { label, value: { speed, angle }, type } = vector;
+
+        // Convert polar coordinates to Cartesian
+        const radians = (angle * Math.PI) / 180;
+        const endX = centerX + speed * scale * Math.cos(radians);
+        const endY = centerY - speed * scale * Math.sin(radians);
+
+        // Draw line for the vector
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", centerX);
+        line.setAttribute("y1", centerY);
+        line.setAttribute("x2", endX);
+        line.setAttribute("y2", endY);
+        line.setAttribute("stroke", type === "wind" ? "red" : "blue");
+        line.setAttribute("stroke-width", "2");
+        svg.appendChild(line);
+
+        // Add label
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("x", endX);
+        text.setAttribute("y", endY - 5);
+        text.setAttribute("class", "label");
+        text.textContent = label;
+        svg.appendChild(text);
+      });
+
+      // Append SVG to the container
+      document.getElementById("vector-container").appendChild(svg);
+    }
+
+    // Draw the vectors
+    drawVectors(vectorData);
+  </script>
+</body>
+
+</html>

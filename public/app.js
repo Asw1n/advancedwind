@@ -53,7 +53,7 @@ function updateWind(data) {
 
   const table = document.createElement('table');
   const headerRow = document.createElement('tr');
-  headerRow.innerHTML = '<th>Label</th><th>Speed (m/s)</th><th>Angle (°)</th>';
+  headerRow.innerHTML = '<th>Label</th><th>Speed (knot)</th><th>Angle (°)</th>';
   table.appendChild(headerRow);
 
   data.windSteps.forEach(step => {
@@ -71,7 +71,7 @@ function updateSpeed(data) {
 
   const table = document.createElement('table');
   const headerRow = document.createElement('tr');
-  headerRow.innerHTML = '<th>Label</th><th>Speed (m/s)</th><th>Angle (°)</th>';
+  headerRow.innerHTML = '<th>Label</th><th>Speed (knot)</th><th>Angle (°)</th>';
   table.appendChild(headerRow);
 
   data.boatSteps.forEach(step => {
@@ -88,13 +88,13 @@ function updateAttitude(data) {
   attitudeContainer.innerHTML = '';
   const table = document.createElement('table');
   const headerRow = document.createElement('tr');
-  headerRow.innerHTML = '<th>Type</th><th>roll</th><th>pitch</th><th>yaw</th>';
+  headerRow.innerHTML = '<th>Label</th><th>roll</th><th>pitch</th>';
   table.appendChild(headerRow);
 
 
   data.attitudeSteps.forEach(step => {
     const row = document.createElement('tr');
-    row.innerHTML = `<td>${step.label}</td><td>${step.roll.toFixed(1)}</td><td>${step.pitch.toFixed(0)}</td><td>${step.yaw.toFixed(0)}</td>`;
+    row.innerHTML = `<td>${step.label}</td><td>${step.roll.toFixed(2)}</td><td>${step.pitch.toFixed(2)}</td>`;
     table.appendChild(row);
   });
   attitudeContainer.appendChild(table);
