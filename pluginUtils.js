@@ -89,6 +89,17 @@ class PolarDelta {
     this.speed = new Delta(app, pluginId, speedPath);
     this.angle = new Delta(app, pluginId, anglePath);
     this.smoothener = new ExponentialMovingAverage();
+    this.color= "blue";
+    this.label="vector";
+    this.plane ="ref_Boat";
+  }
+
+  setVisual(type, refPlane, label, color, scale) {
+    this.type = type;
+    this.plane = refPlane;
+    this.label = label;
+    this.color = color;
+    this.drawScale = scale;
   }
 
   getTimestamp() {

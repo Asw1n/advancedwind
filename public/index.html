@@ -9,49 +9,61 @@
 </head>
 
 <body>
-  <div class="container">
-    <header>
-      <h1>Advanced Wind Data</h1>
-      
-    </header>
+    <section class="vector-section">
+      <div>
+        <svg id="canvas" xmlns="http://www.w3.org/2000/svg" viewBox="-200 -200 400 400" preserveAspectRatio="xMidYMid meet">
+          <!-- Dynamic content will be appended here -->
+        </svg>
+      </div>
+    </section>
 
-    <section class="controls-section">
-      <h2>Controls</h2>
+  <section class="controls-section">
+    <div style ="display:none">
       <label for="update-interval">Update Interval (ms):</label>
       <input type="number" id="update-interval" value="1000" min="500">
       <button id="toggle-updates">Pause Updates</button>
       <p>Timestamp: <span id="timestamp">N/A</span></p>
-    </section>
+    </div>
+  </section>
 
-    <section class="speeds-section">
-      <h2>Boat speed</h2>
-      <div id="speeds-container">
-        <!-- Speeds table will be populated here -->
-      </div>
-    </section>
+  <section class="delta-section">
+    <h2>Deltas</h2>
+    <div id="delta-container">
+      <!-- Speeds table will be populated here -->
+    </div>
+  </section>
 
-    <section class="attitude-section">
-      <h2>Attitude</h2>
-      <div id="attitude-container">
-        <!-- attitude table will be populated here -->
-      </div>
-    </section>
+  <section class="speeds-section">
+    <h2>Boat speed</h2>
+    <div id="speeds-container">
+      <!-- Speeds table will be populated here -->
+    </div>
+  </section>
 
-    <section class="steps-section">
-      <h2>Wind speed</h2>
-      <div id="steps-list">
-        <!-- Steps table will be populated here -->
-      </div>
-    </section>
+  <section class="attitude-section">
+    <h2>Attitude</h2>
+    <div id="attitude-container">
+      <!-- attitude table will be populated here -->
+    </div>
+  </section>
 
-    <section class="options-section">
-      <h2>Plugin options</h2>
-      <div id="options-content">
-        <!-- Options table will be populated here -->
-      </div>
-    </section>
+  <section class="steps-section">
+    <h2>Wind speed</h2>
+    <div id="steps-list">
+      <!-- Steps table will be populated here -->
+    </div>
+  </section>
 
-  </div>
+  <section class="options-section">
+    <h2>Plugin options</h2>
+    <div id="options-content">
+      <!-- Options table will be populated here -->
+    </div>
+  </section>
+
+
+
+
 
   <script src="app.js"></script>
 </body>
