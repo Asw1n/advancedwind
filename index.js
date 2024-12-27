@@ -88,6 +88,7 @@ class Reporter {
 module.exports = function (app) {
 
   let unsubscribes = [];
+  let options = {};
 
   const plugin = {};
   plugin.id = "AdvancedWind";
@@ -168,7 +169,7 @@ module.exports = function (app) {
       upwashSlope: {
         type: "number",
         title: "Upwash slope (α)",
-        description: "Defines the sensitivity of upwash correction to apparent wind angle. For racing yachts, use 0.05 to 0.1; for cruising yachts, use 0.03 to 0.07. Formula used: Upwash Angle (°) = α ⋅ AWA(°) + β(°). For racing yachts: 0.05 to 0.1, for cruising yachts: 0.03 to 0.07 ",
+        description: "Defines the sensitivity of upwash correction to apparent wind angle. For racing yachts, use 0.05 to 0.1; for cruising yachts, use 0.03 to 0.07. Formula used: Upwash Angle (°) = (α ⋅ AWA(°) + β(°)) ⋅ max(0, cos(AWA)). For racing yachts: 0.05 to 0.1, for cruising yachts: 0.03 to 0.07 ",
         default: 0.05,
         minimum: 0,
         maximum: 0.3,
@@ -176,7 +177,7 @@ module.exports = function (app) {
       upwashOffset: {
         type: "number",
         title: "Upwash offset(°) (β)",
-        description: "Adds a constant offset to the upwash correction. Racing yachts typically use values between -1 and 1, while cruising yachts use 1 to 3. Formula used: Upwash Angle (°) = α ⋅ AWA(°) + β(°). For racing yachts: -1 to 1, for cruising yachts: 1 to 3",
+        description: "Adds a constant offset to the upwash correction. Racing yachts typically use values between -1 and 1, while cruising yachts use 1 to 3. Formula used: Upwash Angle (°) = (α ⋅ AWA(°) + β(°)) ⋅ max(0, cos(AWA)). For racing yachts: -1 to 1, for cruising yachts: 1 to 3",
         default: 1.5,
         minimum: -1,
         maximum: 4
@@ -201,7 +202,7 @@ module.exports = function (app) {
         type: "number",
         title: "Leeway k-factor",
         description: "Defines the effect of heel angle on leeway. Boats with higher centers of gravity have higher values. Formula used: k * heel / (speed * speed). ",
-        default: 3,
+        default: 10,
       },
       timeConstant: {
         type: "number",
@@ -235,13 +236,14 @@ module.exports = function (app) {
   const calculatedBoat = new PolarDelta(app, plugin.id, "navigation.speedThroughWater", "environment.wind.directionTruenavigation.leewayAngle");
   const sensorSpeed = new PolarDelta(app, plugin.id, null, null);
 
-  apparentWind.setId("apparentWind", "ref_mast", "apparent wind", "orange", 1);
-  calculatedWind.setId("calculatedWind", "ref_boat", "apparent wind", "red", 1);
-  trueWind.setId("trueWind", "ref_boat", "true wind", "blue", 1);
-  groundWind.setId("groundWind", "ref_ground", "ground wind", "black", 1);
-  calculatedBoat.setId("boatSpeed", "ref_boat", "speed through water", "blue", 1);
-  groundSpeed.setId("groundSpeed", "ref_ground", "speed over ground", "black", 1);
-  sensorSpeed.setId("sensorSpeed", "ref_mast", "sensor", "orange", 1);
+  apparentWind.setId("apparentWind", "ref_mast", "apparent wind");
+  calculatedWind.setId("calculatedWind", "ref_boat", "apparent wind");
+  trueWind.setId("trueWind", "ref_boat", "true wind");
+  groundWind.setId("groundWind", "ref_ground", "ground wind");
+  calculatedBoat.setId("boatSpeed", "ref_boat", "speed through water");
+  boatSpeed.setId("boatSpeed", "ref_boat", "speed through water");
+  groundSpeed.setId("groundSpeed", "ref_ground", "speed over ground");
+  sensorSpeed.setId("sensorSpeed", "ref_mast", "sensor");
 
 
   const reporter = new Reporter();
@@ -256,8 +258,20 @@ module.exports = function (app) {
 
     router.get('/getVectors', (req, res) => {
       const v = { deltas: [], polars: [] };
-      const d= [attitude, mast, heading];
-      const p =[calculatedWind, trueWind, groundWind, calculatedBoat, groundSpeed, sensorSpeed];
+      const d= [heading];
+      const p = [apparentWind, trueWind];
+      if (options.correctForMastHeel || options.correctForMastMovement) d.push(attitude);
+      if ( options.correctForMastMovement) p.push(sensorSpeed);
+      if (options.backCalculate) p.push(calculatedWind);
+      if (options.calculateGroundWind) {
+        p.push(groundWind);
+        p.push(groundSpeed);
+      } 
+      if (options.correctForLeeway) 
+        p.push(calculatedBoat);
+      else 
+        p.push(boatSpeed);
+
       p.forEach(polar => { 
         v.polars.push({
           id: polar.id,
@@ -279,8 +293,9 @@ module.exports = function (app) {
   }
 
 
-  plugin.start = (options) => {
+  plugin.start = (opts) => {
     app.debug("plugin started");
+    options = opts;
    
 
     function calculate(timestamp) {
@@ -367,11 +382,14 @@ module.exports = function (app) {
         }
         groundWind.sendDelta();
       }
-      previousAttitude.copyFrom(attitude);
+      if (attitude.timestamp - previousAttitude.timestamp >=500) {
+        // time difference must be big enough to get a reliable value for rotation
+        previousAttitude.copyFrom(attitude);
+      }
     }
 
     function approximateUpwash(wind) {
-      return options.upwashSlope * wind.angle.value + options.upwashOffset * Math.PI / 180;
+      return (options.upwashSlope * wind.angle.value + options.upwashOffset * Math.PI / 180) * Math.max(0, Math.cos(wind.angle.value));
     }
 
     function approximateWindGradient(wind) {
@@ -416,6 +434,7 @@ module.exports = function (app) {
     unsubscribes.forEach(f => f());
     unsubscribes = [];
     apparentWind.speed.onChange = null;
+    options={};
   };
   return plugin;
 };

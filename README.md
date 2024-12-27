@@ -24,7 +24,7 @@ SignalK paths needed:
 The plugin uses appoximations when applying corrections. The following approximations are used:
 
 - Leeway angle (°) = k ⋅ heel / speed ^ 2
-- Upwash Angle (°) = α ⋅ AWA(°) + β(°)
+- Upwash Angle (°) =  (α ⋅ AWA(°) + β(°)) ⋅ max(0, cos(AWA)).
 - Wind gradient = (10 / sensor height above water)^α
 
 For each of this formulas α and β are parameters that can be specified in the plugin config.

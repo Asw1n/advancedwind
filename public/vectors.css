@@ -33,7 +33,7 @@ stroke: purple;
 
 #mast {
   stroke: purple;
-  stroke-width: 3;
+  stroke-width: 1;
   stroke-linecap: round;
 }
 
@@ -51,7 +51,7 @@ stroke: purple;
 }
 
 #apparentWind, #sensorSpeed {
-  stroke: orangered;
+  stroke: orange;
 }
 
 #groundWind {
