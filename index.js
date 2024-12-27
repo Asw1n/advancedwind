@@ -88,8 +88,7 @@ class Reporter {
 module.exports = function (app) {
 
   let unsubscribes = [];
-  let polars = [];
-  let direction = null;
+
   const plugin = {};
   plugin.id = "AdvancedWind";
   plugin.name = "Advanced Wind";
@@ -182,22 +181,22 @@ module.exports = function (app) {
         minimum: -1,
         maximum: 4
       },
-/*       leewaySpeed: {
-        type: "number",
-        title: "Leeway speed coefficient (α)",
-        description: "Defines the contribution of boat speed to leeway. Wider or less efficient hulls have higher values (0.4–0.5); slender, high-performance hulls have lower values (0.3–0.4). Formula used: α ⋅ Vboat / Vwind + β ⋅ sin(Heel Angle).",
-        default: 0.4,
-        minumum: 0.3,
-        maximum: 0.5
-      },
-      leewayAngle: {
-        type: "number",
-        title: "Leeway Heel Coefficient (β)",
-        description: "Defines the effect of heel angle on leeway. Boats with higher centers of gravity have higher values (0.3–0.4); others use 0.2–0.3. Formula used: α ⋅ Vboat / Vwind + β ⋅ sin(Heel Angle). ",
-        default: 0.3,
-        minimum: 0.2,
-        maximum: 0.4
-      }, */
+      /*       leewaySpeed: {
+              type: "number",
+              title: "Leeway speed coefficient (α)",
+              description: "Defines the contribution of boat speed to leeway. Wider or less efficient hulls have higher values (0.4–0.5); slender, high-performance hulls have lower values (0.3–0.4). Formula used: α ⋅ Vboat / Vwind + β ⋅ sin(Heel Angle).",
+              default: 0.4,
+              minumum: 0.3,
+              maximum: 0.5
+            },
+            leewayAngle: {
+              type: "number",
+              title: "Leeway Heel Coefficient (β)",
+              description: "Defines the effect of heel angle on leeway. Boats with higher centers of gravity have higher values (0.3–0.4); others use 0.2–0.3. Formula used: α ⋅ Vboat / Vwind + β ⋅ sin(Heel Angle). ",
+              default: 0.3,
+              minimum: 0.2,
+              maximum: 0.4
+            }, */
       kFactor: {
         type: "number",
         title: "Leeway k-factor",
@@ -215,6 +214,36 @@ module.exports = function (app) {
     }
   };
 
+
+  const heading = new Delta(app, plugin.id, "navigation.headingTrue");
+  const mast = new Delta(app, plugin.id, null);
+  const attitude = new Delta(app, plugin.id, "navigation.attitude");
+  attitude.value = { pitch: 0, roll: 0, yaw: 0 }; //prevents errors when there is no attitude sensor
+  const previousAttitude = new Delta(app, plugin.id, "navigation.attitude");
+  previousAttitude.copyFrom(attitude);
+
+  heading.setId("heading");
+  mast.setId("mast");
+  attitude.setId("attitude");
+
+  const apparentWind = new PolarDelta(app, plugin.id, "environment.wind.speedApparent", "environment.wind.angleApparent");
+  const boatSpeed = new PolarDelta(app, plugin.id, "navigation.speedThroughWater", "environment.wind.directionTruenavigation.leewayAngle");
+  const groundSpeed = new PolarDelta(app, plugin.id, "navigation.speedOverGround", "navigation.courseOverGroundTrue");
+  const calculatedWind = new PolarDelta(app, plugin.id, "environment.wind.speedApparent", "environment.wind.angleApparent");
+  const trueWind = new PolarDelta(app, plugin.id, "environment.wind.speedTrue", "environment.wind.angleTrueWater");
+  const groundWind = new PolarDelta(app, plugin.id, "environment.wind.speedOverGround", "environment.wind.directionTrue");
+  const calculatedBoat = new PolarDelta(app, plugin.id, "navigation.speedThroughWater", "environment.wind.directionTruenavigation.leewayAngle");
+  const sensorSpeed = new PolarDelta(app, plugin.id, null, null);
+
+  apparentWind.setId("apparentWind", "ref_mast", "apparent wind", "orange", 1);
+  calculatedWind.setId("calculatedWind", "ref_boat", "apparent wind", "red", 1);
+  trueWind.setId("trueWind", "ref_boat", "true wind", "blue", 1);
+  groundWind.setId("groundWind", "ref_ground", "ground wind", "black", 1);
+  calculatedBoat.setId("boatSpeed", "ref_boat", "speed through water", "blue", 1);
+  groundSpeed.setId("groundSpeed", "ref_ground", "speed over ground", "black", 1);
+  sensorSpeed.setId("sensorSpeed", "ref_mast", "sensor", "orange", 1);
+
+
   const reporter = new Reporter();
 
   plugin.registerWithRouter = function (router) {
@@ -226,26 +255,24 @@ module.exports = function (app) {
     });
 
     router.get('/getVectors', (req, res) => {
-      const v = { heading: 0, vectors: [] };
-      let dir =0;
-      if (direction !== null) dir = direction.value ;
-      v.heading = dir * 180 / Math.PI;
-      p=new PolarDelta();
-      polars.forEach(polar => { 
-        if (polar.speed.value !=0) {
-        p.copyFrom(polar);
-        //if (polar.type == "wind") p.angle.value = - p.angle.value;
-        if (polar.plane == "ref_boat") p.rotate(dir);
-        vector = p.getVectorValue();
-        
-        v.vectors.push({label: polar.label,
-          color: polar.color,
-          scale: polar.drawScale,
-          x: vector.y,
-          y: vector.x
+      const v = { deltas: [], polars: [] };
+      const d= [attitude, mast, heading];
+      const p =[calculatedWind, trueWind, groundWind, calculatedBoat, groundSpeed, sensorSpeed];
+      p.forEach(polar => { 
+        v.polars.push({
+          id: polar.id,
+          plane: polar.plane,
+          label: polar.label,
+          speed: polar.speed.value,
+          angle: polar.angle.value,
         });
-       }});
-      
+       });
+      d.forEach(delta => {
+        v.deltas.push({
+          id: delta.id,
+          value: delta.value,
+        });
+      });
       res.json(v);
     });
 
@@ -254,6 +281,7 @@ module.exports = function (app) {
 
   plugin.start = (options) => {
     app.debug("plugin started");
+   
 
     function calculate(timestamp) {
       const timeConstant = options.timeConstant ;
@@ -370,48 +398,24 @@ module.exports = function (app) {
       }
     }
 
-    const apparentWind = new PolarDelta(app, plugin.id, "environment.wind.speedApparent", "environment.wind.angleApparent");
-    const boatSpeed = new PolarDelta(app, plugin.id, "navigation.speedThroughWater", "environment.wind.directionTruenavigation.leewayAngle");
-    const groundSpeed = new PolarDelta(app, plugin.id, "navigation.speedOverGround", "navigation.courseOverGroundTrue");
-    const heading = new Delta(app, plugin.id, "navigation.headingTrue");
-    const mast = new Delta(app, plugin.id, options.rotationPath);
-    const attitude = new Delta(app, plugin.id, "navigation.attitude");
-    attitude.value ={pitch:0, roll:0, yaw:0}; //prevents errors when there is no attitude sensor
+
 
     apparentWind.subscribe(unsubscribes, "instant");
     boatSpeed.speed.subscribe(unsubscribes, "instant");
     groundSpeed.subscribe(unsubscribes, "instant");
     heading.subscribe(unsubscribes, "instant");
     attitude.subscribe(unsubscribes, "instant");
+    mast.path = options.mast;
     mast.subscribe(unsubscribes, "instant");
     apparentWind.speed.onChange = calculate;
-
-    const calculatedWind = new PolarDelta(app, plugin.id, "environment.wind.speedApparent", "environment.wind.angleApparent");
-    const trueWind = new PolarDelta(app, plugin.id, "environment.wind.speedTrue", "environment.wind.angleTrueWater");
-    const groundWind = new PolarDelta(app, plugin.id, "environment.wind.speedOverGround", "environment.wind.directionTrue");
-    const calculatedBoat = new PolarDelta(app, plugin.id, "navigation.speedThroughWater", "environment.wind.directionTruenavigation.leewayAngle");
-    const previousAttitude = new Delta(app, plugin.id, "navigation.attitude");
-    const sensorSpeed = new PolarDelta(app, plugin.id, null, null);
-    previousAttitude.copyFrom(attitude);
-
-    calculatedWind.setVisual("wind", "ref_boat", "apparent wind", "red", 1);
-    trueWind.setVisual("wind", "ref_boat", "true wind", "blue", 1);
-    groundWind.setVisual("wind", "ref_ground", "ground wind", "black", 1);
-    calculatedBoat.setVisual("boat", "ref_boat" ,"speed through water", "blue", 1);
-    groundSpeed.setVisual("boat", "ref_ground"  ,"speed over ground", "black", 1);
-    sensorSpeed.setVisual("boat", "ref_boat", "sensor", "red", 1);
-
     
-    polars = [ calculatedWind, trueWind, groundWind, calculatedBoat, groundSpeed, sensorSpeed];
-    direction = heading;
   }
 
 
   plugin.stop = () => {
     unsubscribes.forEach(f => f());
     unsubscribes = [];
-    polars = [];
-    direction = null;
+    apparentWind.speed.onChange = null;
   };
   return plugin;
 };
