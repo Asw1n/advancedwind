@@ -6,6 +6,11 @@ class Delta {
     this.onChange = null;
     this.app = app;
     this.pluginId = pluginId;
+    this.id="";
+  }
+
+  setId(id) {
+    this.id = id;
   }
 
   setValue(value) {
@@ -92,10 +97,11 @@ class PolarDelta {
     this.color= "blue";
     this.label="vector";
     this.plane ="ref_Boat";
+    this.id="";
   }
 
-  setVisual(type, refPlane, label, color, scale) {
-    this.type = type;
+  setId(id, refPlane, label, color, scale) {
+    this.id = id;
     this.plane = refPlane;
     this.label = label;
     this.color = color;
