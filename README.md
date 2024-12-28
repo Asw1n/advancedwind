@@ -8,8 +8,9 @@ This SignalK plugin calculates true wind and ground wind. Optionally the plugin 
 - Upwash
 - Leeway
 - Sensor heigth
+apparent wind is back calculated from true wind. So that all corrections are applied to apparent wind as well. 
 
-The plugin comes with a webapp that allows you to inspect the effect of the various corrections in real time. I suck at crating nice looking html pages, if you want to help me improve this, please do!
+The plugin comes with a webapp that allows you to inspect the effect of the various corrections in real time. I suck at creating nice looking html pages, if you want to help me improve this, please do!
 
 SignalK paths needed:
 - environment.wind.speedApparent

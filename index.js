@@ -133,11 +133,6 @@ module.exports = function (app) {
         title: "Adjust for leeway",
         description: "The wind pushes the boat sideways, creating leeway that affects the apparent wind at the sensor. This correction estimates leeway using boat speed, wind speed, and heel angle."
       },
-      backCalculate: {
-        type: "boolean",
-        title: "Back calculate apparent wind",
-        description: "Calculate apparent wind from true wind, effectively applying all checked corrections to apparent wind as well."
-      },
       calculateGroundWind: {
         type: "boolean",
         title: "Calculate ground wind",
@@ -258,21 +253,21 @@ module.exports = function (app) {
 
     router.get('/getVectors', (req, res) => {
       const v = { deltas: [], polars: [] };
-      const d= [heading];
+      const d = [heading];
       const p = [apparentWind, trueWind];
       if (options.correctForMastHeel || options.correctForMastMovement) d.push(attitude);
-      if ( options.correctForMastMovement) p.push(sensorSpeed);
+      if (options.correctForMastMovement) p.push(sensorSpeed);
       if (options.backCalculate) p.push(calculatedWind);
       if (options.calculateGroundWind) {
         p.push(groundWind);
         p.push(groundSpeed);
-      } 
-      if (options.correctForLeeway) 
+      }
+      if (options.correctForLeeway)
         p.push(calculatedBoat);
-      else 
+      else
         p.push(boatSpeed);
 
-      p.forEach(polar => { 
+      p.forEach(polar => {
         v.polars.push({
           id: polar.id,
           plane: polar.plane,
@@ -280,7 +275,7 @@ module.exports = function (app) {
           speed: polar.speed.value,
           angle: polar.angle.value,
         });
-       });
+      });
       d.forEach(delta => {
         v.deltas.push({
           id: delta.id,
@@ -296,10 +291,10 @@ module.exports = function (app) {
   plugin.start = (opts) => {
     app.debug("plugin started");
     options = opts;
-   
+
 
     function calculate(timestamp) {
-      const timeConstant = options.timeConstant ;
+      const timeConstant = options.timeConstant;
       reporter.newReport(timestamp, options);
       calculatedWind.copyFrom(apparentWind);
       calculatedBoat.copyFrom(boatSpeed);
@@ -363,14 +358,13 @@ module.exports = function (app) {
       }
       trueWind.sendDelta();
 
-      if (options.backCalculate ) {
-        reporter.addWind("back calculate apparent wind", calculatedWind);
-        if (timeConstant > 0) {
-          calculatedWind.smoothen(timeConstant);
-          reporter.addWind("smoothen apparent wind", calculatedWind);
-        }
-        calculatedWind.sendDelta();
+      reporter.addWind("back calculate apparent wind", calculatedWind);
+      if (timeConstant > 0) {
+        calculatedWind.smoothen(timeConstant);
+        reporter.addWind("smoothen apparent wind", calculatedWind);
       }
+      calculatedWind.sendDelta();
+
       if (options.calculateGroundWind) {
         reporter.addWind("calculate ground wind", groundWind);
         reporter.addBoat("speed over ground", groundSpeed);
@@ -382,7 +376,7 @@ module.exports = function (app) {
         }
         groundWind.sendDelta();
       }
-      if (attitude.timestamp - previousAttitude.timestamp >=500) {
+      if (attitude.timestamp - previousAttitude.timestamp >= 500) {
         // time difference must be big enough to get a reliable value for rotation
         previousAttitude.copyFrom(attitude);
       }
@@ -399,15 +393,15 @@ module.exports = function (app) {
     function approximateLeeway(boat, wind, attitude) {
       //Older formula: return options.leewaySpeed * (boat.speed.value / wind.speed.value) + options.leewayAngle * Math.sin(attitude.value.roll);
       //current formula (K * heel) / (speed * speed)
-      if (boat.speed.value ==0) return 0;
-      const k = options.kFactor / (Math.pow(1.94384, 2) ); // the formula is known to be using knots and degrees. This is a correction so the formula can be used in its known units.
+      if (boat.speed.value == 0) return 0;
+      const k = options.kFactor / (Math.pow(1.94384, 2)); // the formula is known to be using knots and degrees. This is a correction so the formula can be used in its known units.
       const direction = wind.angle.value > 0 ? -1 : 1;
-      const leeway = direction * k * Math.abs(attitude.value.roll) / (Math.pow(boat.speed.value, 2) );
+      const leeway = direction * k * Math.abs(attitude.value.roll) / (Math.pow(boat.speed.value, 2));
       return (leeway);
     }
 
     function calculateRotation(current, previous) {
-      const deltaT = (current.timestamp - previous.timestamp) /1000;
+      const deltaT = (current.timestamp - previous.timestamp) / 1000;
       if (deltaT == 0) return { roll: 0, pitch: 0, yaw: 0 };
       return {
         roll: (current.value.roll - previous.value.roll) / deltaT,
@@ -425,16 +419,15 @@ module.exports = function (app) {
     attitude.subscribe(unsubscribes, "instant");
     mast.path = options.mast;
     mast.subscribe(unsubscribes, "instant");
-    apparentWind.speed.onChange = calculate;
-    
+    apparentWind.catchDeltas(calculate);
   }
 
 
   plugin.stop = () => {
+    apparentWind.stopCatching();
     unsubscribes.forEach(f => f());
     unsubscribes = [];
-    apparentWind.speed.onChange = null;
-    options={};
+    options = {};
   };
   return plugin;
 };

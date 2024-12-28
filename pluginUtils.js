@@ -6,7 +6,7 @@ class Delta {
     this.onChange = null;
     this.app = app;
     this.pluginId = pluginId;
-    this.id="";
+    this.id = "";
   }
 
   setId(id) {
@@ -51,7 +51,6 @@ class Delta {
     this.app.handleMessage(this.pluginId, delta);
   }
 
-
   subscribe(unsubscribes, policy) {
     if (this.path?.trim?.().length) {
       this.app.debug(`subscribing to ${this.path}`);
@@ -94,10 +93,11 @@ class PolarDelta {
     this.speed = new Delta(app, pluginId, speedPath);
     this.angle = new Delta(app, pluginId, anglePath);
     this.smoothener = new ExponentialMovingAverage();
-    this.color= "blue";
-    this.label="polar";
-    this.plane ="ref_Boat";
-    this.id="";
+    this.label = "polar";
+    this.plane = "ref_Boat";
+    this.id = "";
+    this.app = app;
+    this.pluginId = pluginId;
   }
 
   setId(id, refPlane, label) {
@@ -193,6 +193,42 @@ class PolarDelta {
     this.setVectorValue({ x: a.x - vector.x, y: a.y - vector.y });
   }
 
+  catchDeltas(callBack) {
+    this.app.registerDeltaInputHandler((delta, next) => {
+      let found = false;
+      
+      delta.updates.forEach(update => {
+
+        if (update?.source?.label != this.pluginId) {
+          const timestamp = new Date (update.timestamp);
+          update.values.forEach(pathValue => {
+            if (this.speed.path == pathValue.path) {
+              this.speed.value = pathValue.value;
+              this.speed.timestamp = timestamp;
+              found = true;
+            }
+            if (this.angle.path == pathValue.path) {
+              this.angle.value = pathValue.value;
+              this.angle.timestamp = timestamp;
+              found = true;
+            }
+          }
+          )
+        }
+      })
+      if (!found) {
+        next(delta);
+      }
+      else {
+        callBack(this.getTimestamp());
+      }
+    });
+  }
+
+  stopCatching() {
+    this.app.debug("I don't know how to stop catching");
+  }
+
 
 }
 
@@ -210,7 +246,7 @@ class ExponentialMovingAverage {
     }
     else {
       // Calculate the time difference
-      const deltaTime = (currentTime - this.lastTime)/1000;
+      const deltaTime = (currentTime - this.lastTime) / 1000;
       //if (deltaTime == 0) return { x: this.ema.x, y: this.ema.y };
       // Compute alpha
       const alpha = 1 - Math.exp(-deltaTime / timeConstant);
