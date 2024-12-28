@@ -13,20 +13,13 @@ svg {
   height: 100vmin;
 }
 
- line {
-   stroke-width: 1;
-   stroke: green;
- }
-
-    .knotCircle {
-      stroke-width: 1;
-      stroke: white;
-      fill: none;
-      stroke-opacity: 0.5;
-    }
+line {
+  stroke-width: 1;
+  stroke: green;
+}
 
 #hull {
-stroke: purple;
+  stroke: purple;
   stroke-width: 1;
   stroke-linecap: round;
 }
@@ -50,7 +43,8 @@ stroke: purple;
   stroke: red;
 }
 
-#apparentWind, #sensorSpeed {
+#apparentWind,
+#sensorSpeed {
   stroke: orange;
 }
 

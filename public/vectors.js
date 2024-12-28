@@ -18,8 +18,6 @@ function getOffset(data) {
     if (delta.id == "attitude") {
       offset.x = Math.sin(delta.value.pitch) * 30;
       offset.y = Math.sin(delta.value.roll) * 30;
-      console.log(delta.value);
-      console.log(offset);
     }
   });
   return offset;
@@ -29,7 +27,7 @@ function getLargest(data) {
   let largest = 1;
   data.polars.forEach(polar => {
     if (polar.id != "sensorSpeed")
-    largest = Math.max(largest, polar.speed);
+      largest = Math.max(largest, polar.speed);
   });
   return largest;
 }
@@ -69,6 +67,7 @@ function drawVectors(canvas, data, heading, scale) {
     vector.setAttribute("x2", polar.speed * Math.cos(polar.angle) * scale + (polar.plane == "ref_mast" ? offset.x : 0));
     vector.setAttribute("y2", polar.speed * Math.sin(polar.angle) * scale + (polar.plane == "ref_mast" ? offset.y : 0));
     vector.setAttribute("id", polar.id);
+    vector.setAttribute("stroke-dasharray", `${(scale / 1.94384 - 1)} 1`);
     if (polar.plane == "ref_ground")
       vector.setAttribute("transform", `rotate(${-90})`);
     else
@@ -77,19 +76,6 @@ function drawVectors(canvas, data, heading, scale) {
   });
 }
 
-function drawKnots(canvas, largest, scale) {
-  let knot = 0;
-  let r = 0;
-  while (r < largest) {
-    knot += 1;
-    r = knot / 1.94384;
-    radius = r * scale;
-    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    circle.setAttribute("r", radius);
-    circle.setAttribute("class", "knotCircle");
-    canvas.appendChild(circle);
-  }
-}
 
 async function fetchVectorData() {
   const data = await getFromServer('getVectors');
@@ -106,7 +92,7 @@ async function fetchVectorData() {
     }
     else {
       time = new Date();
-      deltaT = (time - lastTime) ;
+      deltaT = (time - lastTime);
       if (largest > previous)
         tc = 1;
       else
@@ -116,9 +102,9 @@ async function fetchVectorData() {
     }
 
     scale = 100 / previous;
-    drawVectors(canvas, data, heading, scale, offset);
-    drawKnots(canvas, largest, scale);
+
     drawBoat(canvas, data, heading, offset);
+    drawVectors(canvas, data, heading, scale, offset);
   }
 
   async function getFromServer(endpoint) {
