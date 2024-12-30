@@ -12,6 +12,7 @@ Each of these three winds are important to a sailor, although for different reas
 - Apparent wind is important for sail trimming. 
 - True wind is important for determining when to tack or gibe. 
 - Ground wind is important to predict the wind after the tide changes or to interprete whaether forecasts.
+
 The relation between the three different winds is as follows:
 - Wind over water (true wind) = wind over ground + current
 - Wind on the vessel (apparent wind) = Wind over water + vessel speed

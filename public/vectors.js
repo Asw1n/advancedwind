@@ -12,15 +12,22 @@ function getHeading(data) {
   return heading;
 }
 
-function getOffset(data) {
+function getOffset(att, height) {
   let offset = { x: 0, y: 0 };
+  offset.x = Math.sin(att.pitch) * height * 7.5;
+  offset.y = Math.sin(att.roll) * height * 7.5;
+  return offset;
+}
+
+function getAtt(data) {
+  let att = { pitch: 0, roll: 0 };
   data.deltas.forEach(delta => {
     if (delta.id == "attitude") {
-      offset.x = Math.sin(delta.value.pitch) * 30;
-      offset.y = Math.sin(delta.value.roll) * 30;
+      att.pitch = (delta.value.pitch);
+      att.roll = (delta.value.roll);
     }
   });
-  return offset;
+  return att;
 }
 
 function getLargest(data) {
@@ -32,7 +39,7 @@ function getLargest(data) {
   return largest;
 }
 
-function drawBoat(canvas, data, heading, offset) {
+function drawBoat(canvas, data, heading, offset, att) {
 
 
   const hull = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -40,7 +47,7 @@ function drawBoat(canvas, data, heading, offset) {
   hull.setAttribute("fill", "none");
   hull.setAttribute("stroke", "black");
   hull.setAttribute("stroke-width", "1");
-  //hull.setAttribute("transform", `scale(1, ${1 - Math.sin(roll)})`);
+  hull.setAttribute("transform", `scale(${1 - Math.abs(Math.sin(att.pitch))}, ${1 - Math.abs(Math.sin(att.roll))})`);
   hull.setAttribute("id", "hull");
 
   const mast = document.createElementNS("http://www.w3.org/2000/svg", "line");
@@ -67,7 +74,16 @@ function drawVectors(canvas, data, heading, scale) {
     vector.setAttribute("x2", polar.speed * Math.cos(polar.angle) * scale + (polar.plane == "ref_mast" ? offset.x : 0));
     vector.setAttribute("y2", polar.speed * Math.sin(polar.angle) * scale + (polar.plane == "ref_mast" ? offset.y : 0));
     vector.setAttribute("id", polar.id);
-    vector.setAttribute("stroke-dasharray", `${(scale / 1.94384 - 1)} 1`);
+    s = scale * 5 / 1.94384 - 1;
+    if (s>50) {
+      s = s / 5;
+      dash = `1 1 ${s - 1} 1 ${s} 1 ${s} 1 ${s} 1 ${s - 1} 1 `;
+    }
+    else {
+      dash = `1 1 ${s - 1} 1 ${s} 1 `;
+    }
+    vector.setAttribute("stroke-dasharray", dash);
+    vector.setAttribute("stroke-dashoffset", `1`);
     if (polar.plane == "ref_ground")
       vector.setAttribute("transform", `rotate(${-90})`);
     else
@@ -85,7 +101,8 @@ async function fetchVectorData() {
 
     heading = getHeading(data);
     largest = getLargest(data);
-    offset = getOffset(data);
+    att = getAtt(data);
+    offset = getOffset(att, data.height);
     if (previous == 0) {
       previous = largest;
       lastTime = new Date();
@@ -103,7 +120,7 @@ async function fetchVectorData() {
 
     scale = 100 / previous;
 
-    drawBoat(canvas, data, heading, offset);
+    drawBoat(canvas, data, heading, offset, att);
     drawVectors(canvas, data, heading, scale, offset);
   }
 
@@ -117,16 +134,32 @@ async function fetchVectorData() {
       });
 
       if (!response.ok) {
-        throw new Error(`Error fetching data: ${response.statusText}`);
+        if (response.status === 503) {
+          throw new Error("Plugin is not running");
+        } else {
+          throw new Error(`Error fetching data: ${response.statusText}`);
+        }
+      }
+      else {
+        document.getElementById("message").innerHTML = "";
       }
 
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error("Failed to fetch data from server:", error);
+      handleError(error);
       return null;
     }
   }
 }
+
+function handleError(error) {
+  document.getElementById("message").innerHTML = `
+      <div>
+        <p>${error}</p>
+      </div>
+    `;
+}
+
 
 setInterval(fetchVectorData, 200); 

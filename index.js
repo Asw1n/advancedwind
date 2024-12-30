@@ -89,12 +89,12 @@ module.exports = function (app) {
 
   let unsubscribes = [];
   let options = {};
+  let isRunning = false;
 
   const plugin = {};
   plugin.id = "AdvancedWind";
   plugin.name = "Advanced Wind";
   plugin.description = "A plugin that calculates true wind while optionally correcting for vessel motion, upwash, leeway and mast height.";
-
   plugin.schema = {
     type: "object",
     properties: {
@@ -210,79 +210,61 @@ module.exports = function (app) {
     }
   };
 
-
-  const heading = new Delta(app, plugin.id, "navigation.headingTrue");
-  const mast = new Delta(app, plugin.id, null);
-  const attitude = new Delta(app, plugin.id, "navigation.attitude");
-  attitude.value = { pitch: 0, roll: 0, yaw: 0 }; //prevents errors when there is no attitude sensor
-  const previousAttitude = new Delta(app, plugin.id, "navigation.attitude");
-  previousAttitude.copyFrom(attitude);
-
-  heading.setId("heading");
-  mast.setId("mast");
-  attitude.setId("attitude");
-
-  const apparentWind = new PolarDelta(app, plugin.id, "environment.wind.speedApparent", "environment.wind.angleApparent");
-  const boatSpeed = new PolarDelta(app, plugin.id, "navigation.speedThroughWater", "environment.wind.directionTruenavigation.leewayAngle");
-  const groundSpeed = new PolarDelta(app, plugin.id, "navigation.speedOverGround", "navigation.courseOverGroundTrue");
-  const calculatedWind = new PolarDelta(app, plugin.id, "environment.wind.speedApparent", "environment.wind.angleApparent");
-  const trueWind = new PolarDelta(app, plugin.id, "environment.wind.speedTrue", "environment.wind.angleTrueWater");
-  const groundWind = new PolarDelta(app, plugin.id, "environment.wind.speedOverGround", "environment.wind.directionTrue");
-  const calculatedBoat = new PolarDelta(app, plugin.id, "navigation.speedThroughWater", "environment.wind.directionTruenavigation.leewayAngle");
-  const sensorSpeed = new PolarDelta(app, plugin.id, null, null);
-
-  apparentWind.setId("apparentWind", "ref_mast", "apparent wind");
-  calculatedWind.setId("calculatedWind", "ref_boat", "apparent wind");
-  trueWind.setId("trueWind", "ref_boat", "true wind");
-  groundWind.setId("groundWind", "ref_ground", "ground wind");
-  calculatedBoat.setId("boatSpeed", "ref_boat", "speed through water");
-  boatSpeed.setId("boatSpeed", "ref_boat", "speed through water");
-  groundSpeed.setId("groundSpeed", "ref_ground", "speed over ground");
-  sensorSpeed.setId("sensorSpeed", "ref_mast", "sensor");
+  var heading, mast, attitude, previousAttitude, apparentWind, boatSpeed, groundSpeed, calculatedWind, trueWind, groundWind, sensorSpeed, reporter;
 
 
-  const reporter = new Reporter();
+
 
   plugin.registerWithRouter = function (router) {
     app.debug('registerWithRouter');
 
     router.get('/getResults', (req, res) => {
-      const report = reporter.getReport();
-      res.json(report);
+      if (!isRunning) {
+        res.status(503).json({ error: "Plugin is not running" });
+      }
+      else {
+        res.json(reporter?.getReport());
+      }
+
     });
 
     router.get('/getVectors', (req, res) => {
-      const v = { deltas: [], polars: [] };
-      const d = [heading];
-      const p = [apparentWind, trueWind];
-      if (options.correctForMastHeel || options.correctForMastMovement) d.push(attitude);
-      if (options.correctForMastMovement) p.push(sensorSpeed);
-      if (options.backCalculate) p.push(calculatedWind);
-      if (options.calculateGroundWind) {
-        p.push(groundWind);
-        p.push(groundSpeed);
+      if (!isRunning) {
+        res.status(503).json({ error: "Plugin is not running" });
       }
-      if (options.correctForLeeway)
-        p.push(calculatedBoat);
-      else
-        p.push(boatSpeed);
+      else {
+        const v = { height: options.heightAboveWater, deltas: [], polars: [] };
+        const d = [heading];
+        const p = [apparentWind, trueWind];
+        if (options.correctForMastHeel || options.correctForMastMovement) d.push(attitude);
+        if (options.correctForMastMovement) p.push(sensorSpeed);
+        if (options.backCalculate) p.push(calculatedWind);
+        if (options.calculateGroundWind) {
+          p.push(groundWind);
+          p.push(groundSpeed);
+        }
+        if (options.correctForLeeway)
+          p.push(calculatedBoat);
+        else
+          p.push(boatSpeed);
 
-      p.forEach(polar => {
-        v.polars.push({
-          id: polar.id,
-          plane: polar.plane,
-          label: polar.label,
-          speed: polar.speed.value,
-          angle: polar.angle.value,
+        p.forEach(polar => {
+          v.polars.push({
+            id: polar.id,
+            plane: polar.plane,
+            label: polar.label,
+            speed: polar.speed.value,
+            angle: polar.angle.value,
+          });
         });
-      });
-      d.forEach(delta => {
-        v.deltas.push({
-          id: delta.id,
-          value: delta.value,
+        d.forEach(delta => {
+          v.deltas.push({
+            id: delta.id,
+            value: delta.value,
+          });
         });
-      });
-      res.json(v);
+        res.json(v);
+      }
     });
 
   }
@@ -291,7 +273,6 @@ module.exports = function (app) {
   plugin.start = (opts) => {
     app.debug("plugin started");
     options = opts;
-
 
     function calculate(timestamp) {
       const timeConstant = options.timeConstant;
@@ -410,24 +391,63 @@ module.exports = function (app) {
       }
     }
 
+    heading = new Delta(app, plugin.id, "navigation.headingTrue");
+    mast = new Delta(app, plugin.id, options.mast);
+    attitude = new Delta(app, plugin.id, "navigation.attitude");
+    attitude.value = { pitch: 0, roll: 0, yaw: 0 }; //prevents errors when there is no attitude sensor
+    previousAttitude = new Delta(app, plugin.id, "navigation.attitude");
+    previousAttitude.value = { pitch: 0, roll: 0, yaw: 0 };
+    apparentWind = new PolarDelta(app, plugin.id, "environment.wind.speedApparent", "environment.wind.angleApparent");
+    boatSpeed = new PolarDelta(app, plugin.id, "navigation.speedThroughWater", "environment.wind.directionTruenavigation.leewayAngle");
+    groundSpeed = new PolarDelta(app, plugin.id, "navigation.speedOverGround", "navigation.courseOverGroundTrue");
+    calculatedWind = new PolarDelta(app, plugin.id, "environment.wind.speedApparent", "environment.wind.angleApparent");
+    trueWind = new PolarDelta(app, plugin.id, "environment.wind.speedTrue", "environment.wind.angleTrueWater");
+    groundWind = new PolarDelta(app, plugin.id, "environment.wind.speedOverGround", "environment.wind.directionTrue");
+    calculatedBoat = new PolarDelta(app, plugin.id, "navigation.speedThroughWater", "environment.wind.directionTruenavigation.leewayAngle");
+    sensorSpeed = new PolarDelta(app, plugin.id, null, null);
 
+    heading.setId("heading");
+    mast.setId("mast");
+    attitude.setId("attitude");
+    apparentWind.setId("apparentWind", "ref_mast", "apparent wind");
+    calculatedWind.setId("calculatedWind", "ref_boat", "apparent wind");
+    trueWind.setId("trueWind", "ref_boat", "true wind");
+    groundWind.setId("groundWind", "ref_ground", "ground wind");
+    calculatedBoat.setId("boatSpeed", "ref_boat", "speed through water");
+    boatSpeed.setId("boatSpeed", "ref_boat", "speed through water");
+    groundSpeed.setId("groundSpeed", "ref_ground", "speed over ground");
+    sensorSpeed.setId("sensorSpeed", "ref_mast", "sensor");
+
+    reporter = new Reporter();
 
     apparentWind.subscribe(unsubscribes, "instant");
     boatSpeed.speed.subscribe(unsubscribes, "instant");
     groundSpeed.subscribe(unsubscribes, "instant");
     heading.subscribe(unsubscribes, "instant");
     attitude.subscribe(unsubscribes, "instant");
-    mast.path = options.mast;
     mast.subscribe(unsubscribes, "instant");
     apparentWind.catchDeltas(calculate);
+    isRunning = true;
   }
 
 
   plugin.stop = () => {
-    apparentWind.stopCatching();
+    isRunning = false;
     unsubscribes.forEach(f => f());
     unsubscribes = [];
     options = {};
+    heading = null;
+    mast = null;
+    attitude = null;
+    previousAttitude = null;
+    apparentWind = null;
+    boatSpeed = null;
+    groundSpeed = null;
+    calculatedWind = null;
+    trueWind = null;
+    groundWind = null;
+    sensorSpeed = null;
+    reporter = null;
   };
   return plugin;
 };
