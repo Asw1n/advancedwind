@@ -357,7 +357,7 @@ module.exports = function (app) {
         }
         groundWind.sendDelta();
       }
-      if (attitude.timestamp - previousAttitude.timestamp >= 500) {
+      if (attitude.timestamp - previousAttitude.timestamp >= 100) {
         // time difference must be big enough to get a reliable value for rotation
         previousAttitude.copyFrom(attitude);
       }
@@ -420,7 +420,7 @@ module.exports = function (app) {
 
     reporter = new Reporter();
 
-    apparentWind.subscribe(unsubscribes, "instant");
+    //apparentWind.subscribe(unsubscribes, "instant");
     boatSpeed.speed.subscribe(unsubscribes, "instant");
     groundSpeed.subscribe(unsubscribes, "instant");
     heading.subscribe(unsubscribes, "instant");

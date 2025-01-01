@@ -13,6 +13,8 @@ svg {
   height: 100vmin;
 }
 
+
+
 line {
   stroke-width: 1;
   stroke: green;
@@ -43,8 +45,11 @@ line {
   stroke: red;
 }
 
-#apparentWind,
 #sensorSpeed {
+  stroke: green;
+}
+
+#apparentWind {
   stroke: orange;
 }
 

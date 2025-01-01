@@ -1,6 +1,6 @@
 {
   "name": "advancedwind",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "A plugin that calculates true wind and ground wind optionally correcting for vessel motion, upwash, leeway and mast height.",
   "main": "index.js",
   "scripts": {
@@ -8,18 +8,23 @@
   },
   "author": "aswin.bouwmeester@gmail.com",
   "license": "ISC",
-    "repository": {
-      "type": "git",
-      "url": "git+https://github.com/Asw1n/advancedwind.git"
-    },
-    "bugs": {
-      "url": "https://github.com/Asw1n/advancedwind/issues"
-    },
-    "homepage": "https://github.com/Asw1n/advancedwind#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Asw1n/advancedwind.git",
+    "directory": "./CHANGELOG.md"
+  },
+  "bugs": {
+    "url": "https://github.com/Asw1n/advancedwind/issues"
+  },
+  "homepage": "https://github.com/Asw1n/advancedwind#readme",
   "keywords": [
     "signalk-webapp",
     "signalk-node-server-plugin",
     "signalk-category-utility"
   ],
-  "signalk-plugin-enabled-by-default": false
+  "signalk-plugin-enabled-by-default": false,
+  "signalk": {
+    "appIcon": "./icon.png",
+    "displayName": "Advanced wind"
+  }
 }

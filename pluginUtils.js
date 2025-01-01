@@ -194,14 +194,15 @@ class PolarDelta {
   }
 
   catchDeltas(callBack) {
+    this.app.debug(`Catching ${this.speed.path} and ${this.angle.path}.`);
     this.app.registerDeltaInputHandler((delta, next) => {
       let found = false;
       
-      delta.updates.forEach(update => {
+      delta?.updates.forEach(update => {
 
         if (update?.source?.label != this.pluginId) {
           const timestamp = new Date (update.timestamp);
-          update.values.forEach(pathValue => {
+          update?.values.forEach(pathValue => {
             if (this.speed.path == pathValue.path) {
               this.speed.value = pathValue.value;
               this.speed.timestamp = timestamp;
@@ -224,11 +225,6 @@ class PolarDelta {
       }
     });
   }
-
-  stopCatching() {
-    this.app.debug("I don't know how to stop catching");
-  }
-
 
 }
 
