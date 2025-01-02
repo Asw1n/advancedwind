@@ -197,24 +197,26 @@ class PolarDelta {
     this.app.debug(`Catching ${this.speed.path} and ${this.angle.path}.`);
     this.app.registerDeltaInputHandler((delta, next) => {
       let found = false;
-      
+
       delta?.updates.forEach(update => {
 
         if (update?.source?.label != this.pluginId) {
-          const timestamp = new Date (update.timestamp);
-          update?.values.forEach(pathValue => {
-            if (this.speed.path == pathValue.path) {
-              this.speed.value = pathValue.value;
-              this.speed.timestamp = timestamp;
-              found = true;
+          const timestamp = new Date(update.timestamp);
+          if (Array.isArray(update?.values)) {
+            update?.values.forEach(pathValue => {
+              if (this.speed.path == pathValue.path) {
+                this.speed.value = pathValue.value;
+                this.speed.timestamp = timestamp;
+                found = true;
+              }
+              if (this.angle.path == pathValue.path) {
+                this.angle.value = pathValue.value;
+                this.angle.timestamp = timestamp;
+                found = true;
+              }
             }
-            if (this.angle.path == pathValue.path) {
-              this.angle.value = pathValue.value;
-              this.angle.timestamp = timestamp;
-              found = true;
-            }
+            )
           }
-          )
         }
       })
       if (!found) {

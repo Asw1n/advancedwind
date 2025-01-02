@@ -138,6 +138,12 @@ module.exports = function (app) {
         title: "Calculate ground wind",
         description: "Calculate the wind speed over ground and direction relative to true north."
       },
+      preventDuplication: {
+        type: "boolean",
+        title: "Replace apparent wind",
+        description: "Replace incoming apparent wind with corrected apparent wind to prevent duplication of apparent wind delta's",
+        default : true
+      },
       sensorMisalignment: {
         type: "number",
         title: "Misalignment of the wind sensor (°)",
@@ -420,13 +426,18 @@ module.exports = function (app) {
 
     reporter = new Reporter();
 
-    //apparentWind.subscribe(unsubscribes, "instant");
     boatSpeed.speed.subscribe(unsubscribes, "instant");
     groundSpeed.subscribe(unsubscribes, "instant");
     heading.subscribe(unsubscribes, "instant");
     attitude.subscribe(unsubscribes, "instant");
     mast.subscribe(unsubscribes, "instant");
-    apparentWind.catchDeltas(calculate);
+    if (options.preventDuplication) {
+      apparentWind.catchDeltas(calculate);
+    } 
+    else {
+      apparentWind.subscribe(unsubscribes, "instant");
+      apparentWind.angle.onChange = calculate;
+    }
     isRunning = true;
   }
 
