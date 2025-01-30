@@ -245,6 +245,7 @@ module.exports = function (app) {
         if (options.correctForMastHeel || options.correctForMastMovement) d.push(attitude);
         if (options.correctForMastMovement) p.push(sensorSpeed);
         if (options.backCalculate) p.push(calculatedWind);
+        if (options.correctForMastRotation) d.push(mast);
         if (options.calculateGroundWind) {
           p.push(groundWind);
           p.push(groundSpeed);
@@ -292,11 +293,6 @@ module.exports = function (app) {
         calculatedWind.rotate(-options.sensorMisalignment * Math.PI / 180);
         reporter.addWind("correct for misalignment", calculatedWind);
       }
-      if (options.correctForMastRotation) {
-        calculatedWind.rotate(-mast.value);
-        reporter.addWind("correct for mast rotation", calculatedWind);
-        reporter.addDelta("mast angle", mast);
-      }
       if (options.correctForUpwash) {
         calculatedWind.rotate(-approximateUpwash(calculatedWind));
         reporter.addWind("correct for upwash", calculatedWind);
@@ -320,6 +316,11 @@ module.exports = function (app) {
         reporter.addWind("sensor speed", sensorSpeed);
         reporter.addRotation("Rotation (°/s)", rotation);
         reporter.addWind("correct for mast movement", calculatedWind);
+      }
+      if (options.correctForMastRotation) {
+        calculatedWind.rotate(-mast.value);
+        reporter.addWind("correct for mast rotation", calculatedWind);
+        reporter.addDelta("mast angle", mast);
       }
       if (options.correctForLeeway) {
         calculatedBoat.angle.value = approximateLeeway(calculatedBoat, calculatedWind, attitude);
@@ -398,7 +399,7 @@ module.exports = function (app) {
     }
 
     heading = new Delta(app, plugin.id, "navigation.headingTrue");
-    mast = new Delta(app, plugin.id, options.mast);
+    mast = new Delta(app, plugin.id, options.rotationPath);
     attitude = new Delta(app, plugin.id, "navigation.attitude");
     attitude.value = { pitch: 0, roll: 0, yaw: 0 }; //prevents errors when there is no attitude sensor
     previousAttitude = new Delta(app, plugin.id, "navigation.attitude");
@@ -413,7 +414,7 @@ module.exports = function (app) {
     sensorSpeed = new PolarDelta(app, plugin.id, null, null);
 
     heading.setId("heading");
-    mast.setId("mast");
+    mast.setId("mast","ref_boat","mast rotation");
     attitude.setId("attitude");
     apparentWind.setId("apparentWind", "ref_mast", "apparent wind");
     calculatedWind.setId("calculatedWind", "ref_boat", "apparent wind");
