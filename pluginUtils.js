@@ -88,7 +88,10 @@ class Delta {
 
 }
 
+const TWO_PI = 2 * Math.PI;
+
 class PolarDelta {
+
   constructor(app, pluginId, speedPath, anglePath) {
     this.speed = new Delta(app, pluginId, speedPath);
     this.angle = new Delta(app, pluginId, anglePath);
@@ -134,6 +137,10 @@ class PolarDelta {
 
   smoothen(timeConstant = 0) {
     this.setVectorValue(this.smoothener.update(this.getVectorValue(), this.getTimestamp(), timeConstant));
+  }
+
+  normalize() {
+      this.angle.value = ((this.angle.value % TWO_PI) + TWO_PI) % TWO_PI;
   }
 
   getVectorValue() {

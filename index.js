@@ -144,6 +144,12 @@ module.exports = function (app) {
         description: "Replace incoming apparent wind with corrected apparent wind to prevent duplication of apparent wind delta's",
         default : true
       },
+      normalizeDirection: {
+        type: "boolean",
+        title: "Normalize wind direction",
+        description: "Normalize wind direction values to be always positive (0 - 2π)",
+        default: false,
+      },
       sensorMisalignment: {
         type: "number",
         title: "Misalignment of the wind sensor (°)",
@@ -344,6 +350,9 @@ module.exports = function (app) {
         trueWind.smoothen(timeConstant);
         reporter.addWind("smoothen true wind", trueWind);
       }
+      if (options.normalizeDirection) {
+          trueWind.normalize();
+      }
       trueWind.sendDelta();
 
       reporter.addWind("back calculate apparent wind", calculatedWind);
@@ -361,6 +370,9 @@ module.exports = function (app) {
         if (timeConstant > 0) {
           groundWind.smoothen(timeConstant);
           reporter.addWind("smoothen ground wind", groundWind);
+        }
+        if (options.normalizeDirection) {
+            groundWind.normalize();
         }
         groundWind.sendDelta();
       }
