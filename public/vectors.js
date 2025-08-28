@@ -1,4 +1,4 @@
-const API_BASE_URL = "/plugins/advancedwind";
+const API_BASE_URL = "/plugins/speedandcurrent";
 let previous = 0;
 let lastTime = new Date();
 
@@ -12,34 +12,17 @@ function getHeading(data) {
   return heading;
 }
 
-function getOffset(att, height) {
-  let offset = { x: 0, y: 0 };
-  offset.x = Math.sin(att.pitch) * height * 7.5;
-  offset.y = Math.sin(att.roll) * height * 7.5;
-  return offset;
-}
-
-function getAtt(data) {
-  let att = { pitch: 0, roll: 0 };
-  data.deltas.forEach(delta => {
-    if (delta.id == "attitude") {
-      att.pitch = (delta.value.pitch);
-      att.roll = (delta.value.roll);
-    }
-  });
-  return att;
-}
 
 function getLargest(data) {
   let largest = 1;
   data.polars.forEach(polar => {
-    if (polar.id != "sensorSpeed")
-      largest = Math.max(largest, polar.speed);
+    largest = Math.max(largest, Math.abs(polar.x));
+    largest = Math.max(largest, Math.abs(polar.y));
   });
   return largest;
 }
 
-function drawBoat(canvas, data, heading, offset, att) {
+function drawBoat(canvas,  heading) {
 
 
   const hull = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -47,21 +30,21 @@ function drawBoat(canvas, data, heading, offset, att) {
   hull.setAttribute("fill", "none");
   hull.setAttribute("stroke", "black");
   hull.setAttribute("stroke-width", "1");
-  hull.setAttribute("transform", `scale(${1 - Math.abs(Math.sin(att.pitch))}, ${1 - Math.abs(Math.sin(att.roll))})`);
+  //hull.setAttribute("transform", `scale(${1 - Math.abs(Math.sin(att.pitch))}, ${1 - Math.abs(Math.sin(att.roll))})`);
   hull.setAttribute("id", "hull");
 
-  const mast = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  mast.setAttribute("x1", 0);
-  mast.setAttribute("y1", 0);
-  mast.setAttribute("x2", offset.x);
-  mast.setAttribute("y2", offset.y);
-  mast.setAttribute("id", "mast");
+  // const mast = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  // mast.setAttribute("x1", 0);
+  // mast.setAttribute("y1", 0);
+  // mast.setAttribute("x2", offset.x);
+  // mast.setAttribute("y2", offset.y);
+  // mast.setAttribute("id", "mast");
 
 
   const boat = document.createElementNS("http://www.w3.org/2000/svg", "g");
   boat.setAttribute("transform", `rotate(${heading - 90})`);
   boat.appendChild(hull);
-  boat.appendChild(mast);
+  // boat.appendChild(mast);
   canvas.appendChild(boat);
 }
 
@@ -69,13 +52,14 @@ function drawBoat(canvas, data, heading, offset, att) {
 function drawVectors(canvas, data, heading, scale) {
   data.polars.forEach(polar => {
     const vector = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    vector.setAttribute("x1", 0 + (polar.plane == "ref_mast" ? offset.x : 0));
-    vector.setAttribute("y1", 0 + (polar.plane == "ref_mast" ? offset.y : 0));
-    vector.setAttribute("x2", polar.speed * Math.cos(polar.angle) * scale + (polar.plane == "ref_mast" ? offset.x : 0));
-    vector.setAttribute("y2", polar.speed * Math.sin(polar.angle) * scale + (polar.plane == "ref_mast" ? offset.y : 0));
+    vector.setAttribute("x1", 0 );
+    vector.setAttribute("y1", 0 );
+    vector.setAttribute("x2", polar.x * scale );
+    vector.setAttribute("y2", polar.y * scale );
     vector.setAttribute("id", polar.id);
-    s = scale * 5 / 1.94384 - 1;
-    if (s>50) {
+    let dash;
+    let s = scale * 5 / 1.94384 - 1;
+    if (s > 50) {
       s = s / 5;
       dash = `1 1 ${s - 1} 1 ${s} 1 ${s} 1 ${s} 1 ${s - 1} 1 `;
     }
@@ -84,7 +68,7 @@ function drawVectors(canvas, data, heading, scale) {
     }
     vector.setAttribute("stroke-dasharray", dash);
     vector.setAttribute("stroke-dashoffset", `1`);
-    if (polar.plane == "ref_ground")
+    if (polar.displayAttributes.plane == "Ground")
       vector.setAttribute("transform", `rotate(${-90})`);
     else
       vector.setAttribute("transform", `rotate(${heading - 90})`);
@@ -99,29 +83,31 @@ async function fetchVectorData() {
     const canvas = document.getElementById("canvas");
     canvas.innerHTML = "";
 
-    heading = getHeading(data);
-    largest = getLargest(data);
-    att = getAtt(data);
-    offset = getOffset(att, data.height);
+    const heading = getHeading(data);
+    const largest = getLargest(data);
+    let time, deltaT;
+
     if (previous == 0) {
       previous = largest;
       lastTime = new Date();
     }
     else {
       time = new Date();
-      deltaT = (time - lastTime);
-      if (largest > previous)
-        tc = 1;
-      else
-        tc = 4;
-      const alpha = 1 - Math.exp(-deltaT / tc);
-      previous = previous + alpha * (largest - previous);
+      deltaT = (time - lastTime)/1000;
+      if (largest != previous)  {
+        if (largest > previous) {
+          previous *= (1.005 );
+        }
+        else {
+          previous *= (0.9995 );
+        }
+      }
     }
 
-    scale = 100 / previous;
+    const scale = 95 / previous;
 
-    drawBoat(canvas, data, heading, offset, att);
-    drawVectors(canvas, data, heading, scale, offset);
+    drawBoat(canvas, heading);
+    drawVectors(canvas, data, heading, scale);
   }
 
   async function getFromServer(endpoint) {
@@ -140,9 +126,7 @@ async function fetchVectorData() {
           throw new Error(`Error fetching data: ${response.statusText}`);
         }
       }
-      else {
-        document.getElementById("message").innerHTML = "";
-      }
+      
 
       const data = await response.json();
       return data;
@@ -154,12 +138,8 @@ async function fetchVectorData() {
 }
 
 function handleError(error) {
-  document.getElementById("message").innerHTML = `
-      <div>
-        <p>${error}</p>
-      </div>
-    `;
+  console.log('Error:', error.message);
 }
 
 
-setInterval(fetchVectorData, 200); 
+setInterval(fetchVectorData, 1000);

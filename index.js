@@ -1,89 +1,4 @@
-const { Delta, PolarDelta } = require('./pluginUtils.js');
-
-class Reporter {
-  constructor() {
-    this.report = {};
-    this.options = null;
-  }
-
-  newReport(timestamp, options) {
-    this.report = {
-      timestamp: timestamp,
-      options: options,
-      windSteps: [
-      ],
-      boatSteps: [
-      ],
-      attitudeSteps: [
-      ],
-      deltas: [
-      ]
-    };
-  }
-
-  toKnots(speed) {
-    return 1.94384 * speed;
-  }
-
-  toDegrees(angle) {
-    return angle * 180 / Math.PI;
-  }
-
-
-  addBoat(label, polar) {
-    this.report.boatSteps.push(
-      {
-        label: label,
-        speed: this.toKnots(polar.speed.value),
-        angle: this.toDegrees(polar.angle.value)
-      });
-  }
-
-  addWind(label, polar) {
-    this.report.windSteps.push(
-      {
-        label: label,
-        speed: this.toKnots(polar.speed.value),
-        angle: this.toDegrees(polar.angle.value)
-      });
-  }
-
-  addAttitude(label, delta) {
-    this.report.attitudeSteps.push(
-      {
-        label: label,
-        roll: this.toDegrees(delta.value.roll),
-        pitch: this.toDegrees(delta.value.pitch),
-      }
-    );
-  }
-
-  addRotation(label, value) {
-    this.report.attitudeSteps.push(
-      {
-        label: label,
-        roll: this.toDegrees(value.roll),
-        pitch: this.toDegrees(value.pitch),
-      }
-    );
-  }
-
-  addDelta(label, value) {
-    this.report.deltas.push(
-      {
-        label: label,
-        value: this.toDegrees(value.value),
-      }
-    );
-
-  }
-
-  getReport() {
-    return this.report;
-  }
-}
-
-
+const { MessageHandler, MessageHandlerDamped, Polar, PolarDamped, SI, Reporter } = require('signalkutilities');
 
 module.exports = function (app) {
 
@@ -96,6 +11,8 @@ module.exports = function (app) {
   plugin.name = "Advanced Wind";
   plugin.description = "A plugin that calculates true wind while optionally correcting for vessel motion, upwash, leeway and mast height.";
   plugin.schema = {
+
+
     type: "object",
     properties: {
       correctForMisalign: {
@@ -138,11 +55,17 @@ module.exports = function (app) {
         title: "Calculate ground wind",
         description: "Calculate the wind speed over ground and direction relative to true north."
       },
+      backCalculateApparentWind: {
+        type: "boolean",
+        title: "Correct apparent wind for mast height",
+        description: "Corrects apparent wind measurements for the height of the mast.",
+        default: true
+      },
       preventDuplication: {
         type: "boolean",
         title: "Replace apparent wind",
         description: "Replace incoming apparent wind with corrected apparent wind to prevent duplication of apparent wind delta's",
-        default : true
+        default: true
       },
       sensorMisalignment: {
         type: "number",
@@ -199,16 +122,11 @@ module.exports = function (app) {
               minimum: 0.2,
               maximum: 0.4
             }, */
-      kFactor: {
-        type: "number",
-        title: "Leeway k-factor",
-        description: "Defines the effect of heel angle on leeway. Boats with higher centers of gravity have higher values. Formula used: k * heel / (speed * speed). ",
-        default: 10,
-      },
+
       timeConstant: {
         type: "number",
-        title: "Output smoothing time constant",
-        description: "Smooths true wind and back-calculated apparent wind outputs. A time constant of 0 disables smoothing, while higher values provide more stable readings.",
+        title: "Input smoothing time constant",
+        description: "Smooths input values exponentially. A time constant of 0 disables smoothing, while higher values provide more stable readings.",
         default: 1,
         minimum: 0,
         maximum: 10
@@ -216,9 +134,21 @@ module.exports = function (app) {
     }
   };
 
-  var heading, mast, attitude, previousAttitude, apparentWind, boatSpeed, groundSpeed, calculatedWind, trueWind, groundWind, sensorSpeed, reporter;
-
-
+  let reportFull = null;
+  let heading = null;
+  let headingStat = null;
+  let mast = null;
+  let mastStat = null;
+  let attitude = null;
+  let attitudeStat = null;
+  let previousAttitude = null;
+  let sensorSpeed = null;
+  let boatSpeed = null;
+  let boatSpeedStat = null;
+  let groundSpeed = null;
+  let groundSpeedStat = null;
+  let calculatedWind = null;
+  let trueWind = null;
 
 
   plugin.registerWithRouter = function (router) {
@@ -229,7 +159,7 @@ module.exports = function (app) {
         res.status(503).json({ error: "Plugin is not running" });
       }
       else {
-        res.json(reporter?.getReport());
+        res.json(reportFull?.getReport());
       }
 
     });
@@ -239,38 +169,8 @@ module.exports = function (app) {
         res.status(503).json({ error: "Plugin is not running" });
       }
       else {
-        const v = { height: options.heightAboveWater, deltas: [], polars: [] };
-        const d = [heading];
-        const p = [apparentWind, trueWind];
-        if (options.correctForMastHeel || options.correctForMastMovement) d.push(attitude);
-        if (options.correctForMastMovement) p.push(sensorSpeed);
-        if (options.backCalculate) p.push(calculatedWind);
-        if (options.correctForMastRotation) d.push(mast);
-        if (options.calculateGroundWind) {
-          p.push(groundWind);
-          p.push(groundSpeed);
-        }
-        if (options.correctForLeeway)
-          p.push(calculatedBoat);
-        else
-          p.push(boatSpeed);
 
-        p.forEach(polar => {
-          v.polars.push({
-            id: polar.id,
-            plane: polar.plane,
-            label: polar.label,
-            speed: polar.speed.value,
-            angle: polar.angle.value,
-          });
-        });
-        d.forEach(delta => {
-          v.deltas.push({
-            id: delta.id,
-            value: delta.value,
-          });
-        });
-        res.json(v);
+        res.json(reportFull?.report());
       }
     });
 
@@ -278,188 +178,227 @@ module.exports = function (app) {
 
 
   plugin.start = (opts) => {
-    app.debug("plugin started");
+    app.debug("plugin started, development version");
+    app.setPluginStatus("Starting");
     options = opts;
+    const candidates = [];
+    const outputs = [];
+    reportFull = new Reporter();
 
-    function calculate(timestamp) {
-      const timeConstant = options.timeConstant;
-      reporter.newReport(timestamp, options);
-      calculatedWind.copyFrom(apparentWind);
-      calculatedBoat.copyFrom(boatSpeed);
-      reporter.addWind("apparent wind", calculatedWind);
-      reporter.addBoat("speed through water", boatSpeed);
+    // heading
+    heading = new MessageHandler("heading", "navigation.headingTrue");
+    heading.subscribe(app, plugin.id);
+    candidates.push(heading);
+    headingStat = new MessageHandlerDamped("headingDamped", heading, options.timeConstant);
+    heading.onChange = () => { headingStat.sample(); }
+    reportFull.addDelta(headingStat);
+
+    //mast rotation
+    if (options.correctForMastRotation && !options.rotationPath) {
+      mast = new MeHandler('mast', options.rotationPath);
+      mast.subscribe(app, plugin.id);
+      candidates.push(mast);
+      mastStat = new MessageHandlerDamped("mastDamped", mast, options.timeConstant);
+      mast.onChange = () => { mastStat.sample(); }
+    }
+
+    //attitude
+    if (options.correctForMastMovement || options.correctForMastHeel) {
+      attitude = new MessageHandler("attitude", "navigation.attitude");
+      attitude.value = { pitch: 0, roll: 0, yaw: 0 };
+      attitude.subscribe(app, plugin.id);
+      attitudeStat = new MessageHandlerDamped("attitudeDamped", attitude, options.timeConstant );
+      attitudeStat.sample();
+      attitude.onChange = () => {attitudeStat.sample();}
+      candidates.push(attitude);
+      reportFull.addAttitude(attitude);
+      sensorSpeed = new Polar("sensorSpeed");
+      reportFull.addPolar(sensorSpeed);
+    }
+
+    //apparent wind
+    apparentWind = new Polar("apparentWind", "environment.wind.speedApparent", "environment.wind.angleApparent");
+    apparentWind.subscribe(app, plugin.id, true, true, !options.preventDuplication);
+    candidates.push(apparentWind);
+    apparentWindStat = new PolarDamped("apparentWindDamped", apparentWind, options.timeConstant, options.timeConstant);
+    apparentWind.onChange = () => { apparentWindStat.sample(); }
+    reportFull.addPolar(apparentWindStat);
+
+    // boat speed
+    boatSpeed = new Polar("boatSpeed", "navigation.speedThroughWater", "environment.wind.directionTruenavigation.leewayAngle");
+    boatSpeed.subscribe(app, plugin.id, true, options.correctForLeeway);
+    candidates.push(boatSpeed);
+    boatSpeedStat = new PolarDamped("boatSpeedDamped", boatSpeed, options.timeConstant);
+    boatSpeed.onChange = () => { boatSpeedStat.sample(); }
+    reportFull.addPolar(boatSpeedStat);
+
+    // ground wind and ground speed
+    if (options.calculateGroundWind) {
+      groundWind = new Polar("groundWind", "environment.wind.speedOverGround", "environment.wind.directionTrue");
+      groundWind.setAngleRange('0to2pi');
+      outputs.push(groundWind);
+
+      groundSpeed = new Polar("groundSpeed", "navigation.speedOverGround", "navigation.courseOverGroundTrue", options.SOGSource, options.COGSource);
+      groundSpeed.subscribe(app, plugin.id, true, true, true);
+      candidates.push(groundSpeed);
+      groundSpeedStat = new MessageHandlerDamped("groundSpeedDamped", groundSpeed, options.timeConstant);
+      groundSpeed.onChange = () => { groundSpeedStat.sample(); }
+      reportFull.addPolar(groundSpeedStat);
+    }
+
+    // calculated wind
+    calculatedWind = new Polar("calculatedWind", "environment.wind.speedApparent", "environment.wind.angleApparent");
+    if (options.backCalculateApparentWind) outputs.push(calculatedWind);
+    reportFull.addPolar(calculatedWind);
+    //true wind
+    trueWind = new Polar("trueWind", "environment.wind.speedTrue", "environment.wind.angleTrueWater");
+    outputs.push(trueWind);
+    reportFull.addPolar(trueWind);
+
+
+    app.debug("Analyzing input data");
+
+    // Wait until all candidates have n >= 2 and no longer have lacking input data, or until 10 seconds have elapsed
+    const maxWait = 10000; // 10 seconds
+    const pollInterval = 200; // ms
+    const startTime = Date.now();
+    let intervalId = null;
+    let ready = false;
+
+    function allCandidatesReady() {
+      return candidates.every(candidate => {
+        const enoughSamples = typeof candidate.frequency === 'number' ;
+        const notLacking = !candidate.lackingInputData();
+        return enoughSamples && notLacking;
+      });
+    }
+
+    function startCalculations() {
+      if (ready) return;
+      ready = true;
+      //candidates.sort((a, b) => (a.frequency || 0) - (b.frequency || 0));
+      apparentWind.onChange = () => {
+        apparentWindStat.sample();
+        calculate();
+      };
+      app.debug("Start wind calculations");
+      app.setPluginStatus("Running");
+      clearInterval(intervalId);
+    }
+
+    intervalId = setInterval(() => {
+      if (allCandidatesReady()) {
+        startCalculations();
+      } else if (Date.now() - startTime >= maxWait) {
+        clearInterval(intervalId); // Stop polling, do not start calculations
+        app.debug("Not all inputs ready after 10 seconds, wind calculations not started.");
+      }
+    }, pollInterval);
+
+    function calculate() {
+      calculatedWind.copyFrom(apparentWindStat);
 
       if (options.correctForMisalign) {
         calculatedWind.rotate(-options.sensorMisalignment * Math.PI / 180);
-        reporter.addWind("correct for misalignment", calculatedWind);
       }
       if (options.correctForUpwash) {
         calculatedWind.rotate(-approximateUpwash(calculatedWind));
-        reporter.addWind("correct for upwash", calculatedWind);
-      }
-      if (options.correctForMastHeel || options.correctForMastMovement) {
-        reporter.addAttitude("Attitude (°)", attitude);
       }
       if (options.correctForMastHeel) {
-        wind = calculatedWind.getVectorValue();
-        wind.x = wind.x / Math.cos(attitude.value.pitch);
-        wind.y = wind.y / Math.cos(attitude.value.roll);
-        calculatedWind.setVectorValue(wind);
-        reporter.addWind("correct for mast heel", calculatedWind);
+        calculatedWind.xValue = calculatedWind.x / Math.cos(attitude.value.pitch);
+        calculatedWind.yValue = calculatedWind.y / Math.cos(attitude.value.roll);
       }
+
       if (options.correctForMastMovement) {
-        const rotation = calculateRotation(attitude, previousAttitude);
+        const rotation = calculateRotation(attitudeStat.value);
         const r = options.heightAboveWater;
-        sensorSpeed.setVectorValue({ x: rotation.pitch * r, y: rotation.roll * r });
-        //const sensorSpeed = { x: rotation.pitch * r, y: rotation.roll * r };
+        const s = { x: rotation.pitch * r, y: rotation.roll * r };
+        sensorSpeed.setVectorValue(s);
         calculatedWind.substract(sensorSpeed);
-        reporter.addWind("sensor speed", sensorSpeed);
-        reporter.addRotation("Rotation (°/s)", rotation);
-        reporter.addWind("correct for mast movement", calculatedWind);
       }
+
       if (options.correctForMastRotation) {
-        calculatedWind.rotate(-mast.value);
-        reporter.addWind("correct for mast rotation", calculatedWind);
-        reporter.addDelta("mast angle", mast);
+        calculatedWind.rotate(-mastStat.value);
       }
       if (options.correctForLeeway) {
-        calculatedBoat.angle.value = approximateLeeway(calculatedBoat, calculatedWind, attitude);
-        reporter.addBoat("correct for leeway", calculatedBoat);
-        calculatedBoat.angle.sendDelta();
+        // Already taken care of by the boat speed object
       }
+
       trueWind.copyFrom(calculatedWind);
-      trueWind.substract(calculatedBoat);
-      reporter.addWind("calculate true wind", trueWind);
+      trueWind.substract(boatSpeedStat);
       if (options.correctForHeight) {
         trueWind.scale(approximateWindGradient())
-        reporter.addWind("normalise to 10 meters", trueWind);
+        calculatedWind.copyFrom(trueWind);
+        calculatedWind.add(boatSpeedStat);
       }
-      calculatedWind.copyFrom(trueWind);
-      calculatedWind.add(boatSpeed);
-      groundWind.copyFrom(calculatedWind);
-      groundWind.rotate(heading.value);
-      groundWind.substract(groundSpeed);
-      //groundWind.rotate(heading.value);
-      if (timeConstant > 0) {
-        trueWind.smoothen(timeConstant);
-        reporter.addWind("smoothen true wind", trueWind);
-      }
-      trueWind.sendDelta();
-
-      reporter.addWind("back calculate apparent wind", calculatedWind);
-      if (timeConstant > 0) {
-        calculatedWind.smoothen(timeConstant);
-        reporter.addWind("smoothen apparent wind", calculatedWind);
-      }
-      calculatedWind.sendDelta();
-
       if (options.calculateGroundWind) {
-        reporter.addWind("calculate ground wind", groundWind);
-        reporter.addBoat("speed over ground", groundSpeed);
-        reporter.addDelta("heading", heading);
-
-        if (timeConstant > 0) {
-          groundWind.smoothen(timeConstant);
-          reporter.addWind("smoothen ground wind", groundWind);
-        }
-        groundWind.sendDelta();
+        groundWind.copyFrom(calculatedWind);
+        groundWind.rotate(heading.value);
+        groundWind.substract(groundSpeed);
       }
-      if (attitude.timestamp - previousAttitude.timestamp >= 100) {
-        // time difference must be big enough to get a reliable value for rotation
-        previousAttitude.copyFrom(attitude);
-      }
+
+      Polar.send(app, plugin.id, outputs);
     }
+  }
 
-    function approximateUpwash(wind) {
-      return (options.upwashSlope * wind.angle.value + options.upwashOffset * Math.PI / 180) * Math.max(0, Math.cos(wind.angle.value));
+  function approximateUpwash(wind) {
+    return (options.upwashSlope * wind.angle.value + options.upwashOffset * Math.PI / 180) * Math.max(0, Math.cos(wind.angle.value));
+  }
+
+  function approximateWindGradient(wind) {
+    return Math.pow((10 / options.heightAboveWater), options.windExponent);
+  }
+
+  let lastTime = null;
+  let previous = null;
+  function calculateRotation(current) {
+    speed = { roll: 0, pitch: 0, yaw: 0 };
+    if (!lastTime ) {
+      lastTime = Date.now();
+      previous = { ...current };
+      return speed;
     }
-
-    function approximateWindGradient(wind) {
-      return Math.pow((10 / options.heightAboveWater), options.windExponent);
+    let now = Date.now();
+    let deltaT = (now - lastTime) / 1000;
+    lastTime = now;
+    if (deltaT > 0) {
+      speed = {roll: (current.roll - previous.roll) / deltaT,
+        pitch: (current.pitch - previous.pitch) / deltaT,
+        yaw: (current.yaw - previous.yaw) / deltaT
+      };
     }
-
-    function approximateLeeway(boat, wind, attitude) {
-      //Older formula: return options.leewaySpeed * (boat.speed.value / wind.speed.value) + options.leewayAngle * Math.sin(attitude.value.roll);
-      //current formula (K * heel) / (speed * speed)
-      if (boat.speed.value == 0) return 0;
-      const k = options.kFactor / (Math.pow(1.94384, 2)); // the formula is known to be using knots and degrees. This is a correction so the formula can be used in its known units.
-      const direction = wind.angle.value > 0 ? -1 : 1;
-      const leeway = direction * k * Math.abs(attitude.value.roll) / (Math.pow(boat.speed.value, 2));
-      return (leeway);
-    }
-
-    function calculateRotation(current, previous) {
-      const deltaT = (current.timestamp - previous.timestamp) / 1000;
-      if (deltaT == 0) return { roll: 0, pitch: 0, yaw: 0 };
-      return {
-        roll: (current.value.roll - previous.value.roll) / deltaT,
-        pitch: (current.value.pitch - previous.value.pitch) / deltaT,
-        yaw: (current.value.yaw - previous.value.yaw) / deltaT
-      }
-    }
-
-    heading = new Delta(app, plugin.id, "navigation.headingTrue");
-    mast = new Delta(app, plugin.id, options.rotationPath);
-    attitude = new Delta(app, plugin.id, "navigation.attitude");
-    attitude.value = { pitch: 0, roll: 0, yaw: 0 }; //prevents errors when there is no attitude sensor
-    previousAttitude = new Delta(app, plugin.id, "navigation.attitude");
-    previousAttitude.value = { pitch: 0, roll: 0, yaw: 0 };
-    apparentWind = new PolarDelta(app, plugin.id, "environment.wind.speedApparent", "environment.wind.angleApparent");
-    boatSpeed = new PolarDelta(app, plugin.id, "navigation.speedThroughWater", "environment.wind.directionTruenavigation.leewayAngle");
-    groundSpeed = new PolarDelta(app, plugin.id, "navigation.speedOverGround", "navigation.courseOverGroundTrue");
-    calculatedWind = new PolarDelta(app, plugin.id, "environment.wind.speedApparent", "environment.wind.angleApparent");
-    trueWind = new PolarDelta(app, plugin.id, "environment.wind.speedTrue", "environment.wind.angleTrueWater");
-    groundWind = new PolarDelta(app, plugin.id, "environment.wind.speedOverGround", "environment.wind.directionTrue");
-    calculatedBoat = new PolarDelta(app, plugin.id, "navigation.speedThroughWater", "environment.wind.directionTruenavigation.leewayAngle");
-    sensorSpeed = new PolarDelta(app, plugin.id, null, null);
-
-    heading.setId("heading");
-    mast.setId("mast","ref_boat","mast rotation");
-    attitude.setId("attitude");
-    apparentWind.setId("apparentWind", "ref_mast", "apparent wind");
-    calculatedWind.setId("calculatedWind", "ref_boat", "apparent wind");
-    trueWind.setId("trueWind", "ref_boat", "true wind");
-    groundWind.setId("groundWind", "ref_ground", "ground wind");
-    calculatedBoat.setId("boatSpeed", "ref_boat", "speed through water");
-    boatSpeed.setId("boatSpeed", "ref_boat", "speed through water");
-    groundSpeed.setId("groundSpeed", "ref_ground", "speed over ground");
-    sensorSpeed.setId("sensorSpeed", "ref_mast", "sensor");
-
-    reporter = new Reporter();
-
-    boatSpeed.speed.subscribe(unsubscribes, "instant");
-    groundSpeed.subscribe(unsubscribes, "instant");
-    heading.subscribe(unsubscribes, "instant");
-    attitude.subscribe(unsubscribes, "instant");
-    mast.subscribe(unsubscribes, "instant");
-    if (options.preventDuplication) {
-      apparentWind.catchDeltas(calculate);
-    } 
-    else {
-      apparentWind.subscribe(unsubscribes, "instant");
-      apparentWind.angle.onChange = calculate;
-    }
-    isRunning = true;
+    previous = { ...current };
+    return speed;
   }
 
 
+
+
   plugin.stop = () => {
-    isRunning = false;
-    unsubscribes.forEach(f => f());
-    unsubscribes = [];
-    options = {};
-    heading = null;
-    mast = null;
-    attitude = null;
-    previousAttitude = null;
-    apparentWind = null;
-    boatSpeed = null;
-    groundSpeed = null;
-    calculatedWind = null;
-    trueWind = null;
-    groundWind = null;
-    sensorSpeed = null;
-    reporter = null;
+    return new Promise((resolve, reject) => {
+      try {
+        options = {};
+        reportFull = null;
+        heading = null;
+        headingStat = null;
+        mast = null;
+        mastStat = null;
+        attitude = null;
+        attitudeStat = null;
+        previousAttitude = null;
+        sensorSpeed = null;
+        boatSpeed = null;
+        boatSpeedStat = null;
+        groundSpeed = null;
+        groundSpeedStat = null;
+        calculatedWind = null;
+        trueWind = null;
+        app.setPluginStatus("Stopped");
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    });
   };
   return plugin;
-};
+}
