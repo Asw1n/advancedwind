@@ -1,4 +1,4 @@
-const API_BASE_URL = "/plugins/speedandcurrent";
+const API_BASE_URL = "/plugins/advancedwind";
 let previous = 0;
 let lastTime = new Date();
 

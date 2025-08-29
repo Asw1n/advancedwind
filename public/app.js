@@ -1,8 +1,103 @@
-const API_BASE_URL = "/plugins/advancedwind"; // Adjust based on your server configuration
+const API_BASE_URL = "/plugins/advancedwind"; 
+import TableRenderer from './TableRenderer.js';
+
 
 let updateInterval = 1000;
 let updateTimer;
 let updatesPaused = false;
+
+let vAngle = 1;
+let dAngle = 2;
+let vSpeed = 1;
+let dSpeed = 1;
+
+
+export function handleSpeedUnitChange(value) {
+  if (value == "knots") {
+    vSpeed = 1.943844;
+    dSpeed = 1;
+    return;
+  }
+  if (value == "kmh") {
+    vSpeed = 3.6;
+    dSpeed = 1;
+    return;
+  }
+  vSpeed = 1;
+  dSpeed = 1;
+}
+
+export function handleAngleUnitChange(value) {
+  if (value == "degrees") {
+    vAngle = 180 / Math.PI;
+    dAngle = 0;
+    return;
+  }
+  vAngle = 1;
+  dAngle = 2;
+}
+
+
+
+export function handleTableStyleChange(value) {
+  //console.log(value);
+  if (value == "cartesian") {
+    tableRenderer.setCellFormat(cartesian);
+  }
+  else {
+    tableRenderer.setCellFormat(polar);
+  }
+}
+
+function cAngle(value) {
+  value *= vAngle;
+  return value.toFixed(dAngle);
+}
+
+function cSpeed(value) {
+  value *= vSpeed;
+  return value.toFixed(dSpeed);
+}
+
+function cartesian(correction, speed, heel) {
+  if (correction.N == 0) return null;
+  return ` <div><strong>X:</strong> ${cSpeed(correction.x)}</div>
+           <div><strong>Y:</strong> ${cSpeed(correction.y)}</div>
+           <div><strong>N:</strong> ${correction.N}</div>
+          `;
+}
+
+function polar(correction, speed, heel) {
+  if (speed == 0 || correction.N == 0) return null;
+  const factor = (correction.x + speed) / speed;
+  return ` <div><strong>factor:</strong> ${factor.toFixed(2)}</div>
+           <div><strong>leeway:</strong> ${cAngle(Math.atan2(correction.y, speed))}</div>
+           <div><strong>N:</strong> ${correction.N}</div>
+          `;
+}
+
+function formatCellX(value, speed, heel) {
+  if (value.N == 0) return null;
+  return cSpeed(value.x);
+}
+
+function formatCellY(value, speed, heel) {
+  if (value.N == 0) return null;
+  return Math.abs(cSpeed(value.y));
+}
+
+function formatCellXPolar(value, speed, heel) {
+  if (value.N == 0) return null;
+  const factor = (correction.x + speed) / speed;
+  return factor.toFixed(2);
+}
+
+function formatCellYPolar(value, speed, heel) {
+  if (value.N == 0) return null;
+  return Math.abs(cAngle(Math.atan2(value.y, speed)));
+}
+
+
 
 async function getFromServer(endpoint) {
   try {
@@ -14,20 +109,26 @@ async function getFromServer(endpoint) {
     });
 
     if (!response.ok) {
-      throw new Error(`Error fetching data: ${response.statusText}`);
+      if (response.status === 503) {
+        document.getElementById("message").innerHTML = "Plugin is not running";
+      } else {
+        document.getElementById("message").innerHTML = "Failed to fetch data. Error: " + response.status + " " + response.statusText;
+      }
+    }
+    else {
+      document.getElementById("message").innerHTML = "";
     }
 
     const data = await response.json();
     return data;
   } catch (error) {
     console.error("Failed to fetch data from server:", error);
+    document.getElementById("message").innerHTML = error;
     return null;
   }
 }
 
-function updateMetadata(data) {
-  document.getElementById('timestamp').textContent = data.timestamp;
-}
+
 
 function updateOptions(data) {
   const optionsContent = document.getElementById('options-content');
@@ -39,44 +140,35 @@ function updateOptions(data) {
   table.appendChild(headerRow);
 
   Object.entries(data.options).forEach(([key, value]) => {
-    const row = document.createElement('tr');
-    row.innerHTML = `<td>${key}</td><td>${value}</td>`;
-    table.appendChild(row);
+    const type = typeof value;
+    if (type === 'string' || type === 'number' || type === 'boolean') {
+
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${key}</td><td>${value}</td>`;
+      table.appendChild(row);
+    };
   });
 
   optionsContent.appendChild(table);
 }
 
-function updateWind(data) {
-  const stepsList = document.getElementById('steps-list');
-  stepsList.innerHTML = ''; // Clear previous steps
 
-  const table = document.createElement('table');
-  const headerRow = document.createElement('tr');
-  headerRow.innerHTML = '<th>Label</th><th>Speed (knot)</th><th>Angle (°)</th>';
-  table.appendChild(headerRow);
-
-  data.windSteps.forEach(step => {
-    const row = document.createElement('tr');
-    row.innerHTML = `<td>${step.label}</td><td>${step.speed.toFixed(1)}</td><td>${step.angle.toFixed(0)}</td>`;
-    table.appendChild(row);
-  });
-
-  stepsList.appendChild(table);
-}
-
-function updateSpeed(data) {
+function updatePolar(data) {
   const stepsList = document.getElementById('speeds-container');
   stepsList.innerHTML = ''; // Clear previous steps
 
   const table = document.createElement('table');
+  table.classList.add('polar');
   const headerRow = document.createElement('tr');
-  headerRow.innerHTML = '<th>Label</th><th>Speed (knot)</th><th>Angle (°)</th>';
+  headerRow.innerHTML = '<th>Label</th><th>Speed</th><th>Angle</th>';
   table.appendChild(headerRow);
 
-  data.boatSteps.forEach(step => {
+  data.polars.forEach(polar => {
     const row = document.createElement('tr');
-    row.innerHTML = `<td>${step.label}</td><td>${step.speed.toFixed(1)}</td><td>${step.angle.toFixed(0)}</td>`;
+    if (polar.id) {
+      row.id = polar.id;
+    }
+    row.innerHTML = `<td>${polar.displayAttributes.label}</td><td>${cSpeed(polar.magnitude)}</td><td>${cAngle(polar.angle)}</td>`;
     table.appendChild(row);
   });
 
@@ -88,13 +180,17 @@ function updateDelta(data) {
   stepsList.innerHTML = ''; // Clear previous steps
 
   const table = document.createElement('table');
+  table.classList.add('delta');
   const headerRow = document.createElement('tr');
-  headerRow.innerHTML = '<th>Label</th><th>Delta (°)</th>';
+  headerRow.innerHTML = '<th>Label</th><th>Value</th>';
   table.appendChild(headerRow);
 
-  data.deltas.forEach(step => {
+  data.deltas.forEach(delta => {
     const row = document.createElement('tr');
-    row.innerHTML = `<td>${step.label}</td><td>${step.value.toFixed(0)}</td>`;
+    if (delta.id) {
+      row.id = delta.id;
+    }
+    row.innerHTML = `<td>${delta.displayAttributes.label}</td><td>${cAngle(delta.value)}</td>`;
     table.appendChild(row);
   });
 
@@ -105,29 +201,46 @@ function updateAttitude(data) {
   const attitudeContainer = document.getElementById('attitude-container');
   attitudeContainer.innerHTML = '';
   const table = document.createElement('table');
+  table.classList.add('attitude');
+
   const headerRow = document.createElement('tr');
-  headerRow.innerHTML = '<th>Label</th><th>roll</th><th>pitch</th>';
+  headerRow.innerHTML = '<th>Label</th><th>roll</th><th>pitch</th><th>yaw</th>';
   table.appendChild(headerRow);
 
 
-  data.attitudeSteps.forEach(step => {
+  data.attitudes.forEach(attitude => {
     const row = document.createElement('tr');
-    row.innerHTML = `<td>${step.label}</td><td>${step.roll.toFixed(2)}</td><td>${step.pitch.toFixed(2)}</td>`;
+    if (attitude.id) {
+      row.id = attitude.id;
+    }
+    row.innerHTML = `<td>${attitude.displayAttributes.label}</td><td>${cAngle(attitude.value.roll)}</td><td>${cAngle(attitude.value.pitch)}</td><td>${cAngle(attitude.value.yaw)}</td>`;
     table.appendChild(row);
   });
   attitudeContainer.appendChild(table);
 }
 
+function updateTable(data) {
+  const tableContainer = document.getElementById('table-container');
+  tableContainer.innerHTML = '';
+    data.tables.forEach(table => {
+
+    const tableElement = tableRenderer.render(table);
+    tableContainer.appendChild(tableElement);
+  });
+}
+
+
+
+
 async function fetchAndUpdateData() {
   const data = await getFromServer('getResults'); // Updated endpoint
   if (data) {
-
-    updateMetadata(data);
-    updateOptions(data);
-    updateWind(data);
-    updateSpeed(data);
+    console.log(data);
+    //updateOptions(data);
+    updatePolar(data);
     updateAttitude(data);
     updateDelta(data);
+    updateTable(data);
   }
 }
 
@@ -136,25 +249,39 @@ function startUpdates() {
   updateTimer = setInterval(fetchAndUpdateData, updateInterval);
 }
 
-function toggleUpdates() {
+export function toggleUpdates() {
   updatesPaused = !updatesPaused;
   const toggleButton = document.getElementById('toggle-updates');
 
   if (updatesPaused) {
     clearInterval(updateTimer);
-    toggleButton.textContent = "Resume Updates";
+    toggleButton.textContent = "Resume";
   } else {
-    toggleButton.textContent = "Pause Updates";
+    toggleButton.textContent = "Pause";
     startUpdates();
   }
 }
 
-document.getElementById('update-interval').addEventListener('input', (event) => {
-  updateInterval = parseInt(event.target.value, 10) || 1000;
-  if (!updatesPaused) startUpdates();
-});
 
-document.getElementById('toggle-updates').addEventListener('click', toggleUpdates);
+
+
+
+//document.getElementById('toggle-updates').addEventListener('click', toggleUpdates);
+
+handleSpeedUnitChange("knots");
+handleAngleUnitChange("degrees");
+
+const tableRenderer = new TableRenderer();
+handleTableStyleChange("cartesian");
+tableRenderer.setColumnHeaderFormat(cAngle);
+tableRenderer.setRowHeaderFormat(cSpeed);
+
+
+// Attach functions to the window object to make them globally accessible
+window.handleSpeedUnitChange = handleSpeedUnitChange;
+window.handleAngleUnitChange = handleAngleUnitChange;
+window.handleTableStyleChange = handleTableStyleChange;
+window.toggleUpdates = toggleUpdates;
 
 
 // Initial fetch and start updates

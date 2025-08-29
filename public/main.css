@@ -20,6 +20,12 @@
   --speedCorrection-color: #ad1457; /* darker pink/red */
   --residual-color: #6a1b9a;        /* darker purple */
   --correctionTable-color: #4e342e; /* darker brown */
+
+  /* Wind vector instance colors */
+  --apparentWind-color: #0288d1;         /* medium blue-cyan */
+  --trueWind-color: #00bcd4;             /* lighter cyan */
+  --groundWind-color: #1976d2;           /* strong blue */
+  --correctedApparentWind-color: #26c6da;/* soft cyan-blue */
 }
 
 /* --- Data Type Classes --- */
@@ -68,6 +74,22 @@
 #correctionTable {
   color: var(--correctionTable-color);
   stroke: var(--correctionTable-color);
+}
+#apparentWind {
+  color: var(--apparentWind-color);
+  stroke: var(--apparentWind-color);
+}
+#trueWind {
+  color: var(--trueWind-color);
+  stroke: var(--trueWind-color);
+}
+#groundWind {
+  color: var(--groundWind-color);
+  stroke: var(--groundWind-color);
+}
+#calculatedWind {
+  color: var(--correctedApparentWind-color);
+  stroke: var(--correctedApparentWind-color);
 }
 
 /* --- Table and Cell Styling --- */
