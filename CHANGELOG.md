@@ -24,3 +24,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - Bug in changing the configuration while the plugin is enabled
 
+## [2.2.0] - 2025-8-30
+### Removed 
+- Leeway estimation. Tip: Get leeway from the Speed and Current plugin or the derived data plugin
+### Added
+- Oversampling and moving average for all input paths
+- options to set sourced (name.id) for all input paths
+- log warnings if input paths are not available or getting updates
+### Fixed
+- Better performance, less CPU
+- Ground wind speed and direction are calculated
+- Ground wind direction uses 0 to 2PI range instead of (-PI to PI)
+
