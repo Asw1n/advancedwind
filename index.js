@@ -255,7 +255,7 @@ module.exports = function (app) {
     //apparent wind
     apparentWind = new Polar("apparentWind", "environment.wind.speedApparent", "environment.wind.angleApparent", options.apparentWindSource, options.apparentWindSource);
     // bug in logic to prevent duplication, temporary disabled
-    apparentWind.subscribe(app, plugin.id, true, true, false &&!options.preventDuplication, missingData);
+    apparentWind.subscribe(app, plugin.id, true, true, true &&!options.preventDuplication, missingData);
     apparentWindStat = new PolarDamped("apparentWind", apparentWind, options.timeConstant, options.timeConstant);
     apparentWind.onChange = () => { apparentWindStat.sample(); }
     apparentWindStat.setDisplayAttributes({ label: "Apparent Wind", plane:"Boat" });
