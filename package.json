@@ -1,6 +1,6 @@
 {
   "name": "advancedwind",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "A plugin that calculates true wind and ground wind optionally correcting for vessel motion, upwash, leeway and mast height.",
   "main": "index.js",
   "scripts": {
