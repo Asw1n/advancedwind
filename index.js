@@ -165,6 +165,10 @@ module.exports = function (app) {
     }
   };
 
+  // plugin.uiSchema = {
+  //   'ui:order': ["mode", "maxSpeed", "speedStep", "maxHeel", "heelStep", "headingSource", "boatSpeedSource", "COGSource", "SOGSource", "attitudeSource", "preventDuplication", "updateCorrectionTable", "estimateBoatSpeed", "correctionStability", "doStartFresh", "assumeCurrent", "estimateCurrent", "currentStability"],
+  // };
+
   let reportFull = null;
   let heading = null;
   let headingStat = null;
@@ -217,6 +221,7 @@ module.exports = function (app) {
     const outputs = [];
     reportFull = new Reporter();
 
+    //#region initialization of paths
     // heading
     heading = new MessageHandler("heading", "navigation.headingTrue", options.headingSource);
     heading.subscribe(app, plugin.id, true, missingData);
@@ -224,17 +229,18 @@ module.exports = function (app) {
     heading.onChange = () => { headingStat.sample(); }
 
     headingStat.setDisplayAttributes({ label: "Heading" });
-    reportFull.addDelta(headingStat);
-
+    
     //mast rotation
-    if (options.correctForMastRotation && !options.rotationPath) {
+    if (options.correctForMastRotation && options.rotationPath) {
       mast = new MessageHandler("mast", options.rotationPath, options.rotationSource);
       mast.subscribe(app, plugin.id, true, missingData);
       mastStat = new MessageHandlerDamped("mast", mast, options.timeConstant);
       mast.onChange = () => { mastStat.sample(); }
+      // ensure initial value is 0
+      mast.value = 0; // for testing only Math.PI * 4 / 180;
+      mastStat.sample();
 
       mastStat.setDisplayAttributes({ label: "Mast Rotation" });
-      reportFull.addDelta(mastStat);
     }
 
     //attitude
@@ -246,10 +252,8 @@ module.exports = function (app) {
       attitudeStat.sample();
       attitude.onChange = () => { attitudeStat.sample(); }
       attitudeStat.setDisplayAttributes({ label: "Attitude" });
-      reportFull.addAttitude(attitudeStat);
       sensorSpeed = new Polar("sensorSpeed");
       sensorSpeed.setDisplayAttributes({ label: "Speed of sensor", plane:"Boat" });
-      reportFull.addPolar(sensorSpeed);
     }
 
     //apparent wind
@@ -258,8 +262,7 @@ module.exports = function (app) {
     apparentWind.subscribe(app, plugin.id, true, true, true &&!options.preventDuplication, missingData);
     apparentWindStat = new PolarDamped("apparentWind", apparentWind, options.timeConstant, options.timeConstant);
     apparentWind.onChange = () => { apparentWindStat.sample(); }
-    apparentWindStat.setDisplayAttributes({ label: "Apparent Wind", plane:"Boat" });
-    reportFull.addPolar(apparentWindStat);
+    apparentWindStat.setDisplayAttributes({ label: "Observed apparent Wind", plane:"Boat" });
 
     // boat speed
     boatSpeed = new Polar("boatSpeed", "navigation.speedThroughWater", options.correctForLeeway ? "navigation.leewayAngle" : options.boatSpeedSource, options.boatSpeedSource);
@@ -267,7 +270,6 @@ module.exports = function (app) {
     boatSpeedStat = new PolarDamped("boatSpeed", boatSpeed, options.timeConstant);
     boatSpeed.onChange = () => { boatSpeedStat.sample(); }
     boatSpeedStat.setDisplayAttributes({ label: "Boat Speed", plane:"Boat" });
-    reportFull.addPolar(boatSpeedStat);
 
     // ground wind and ground speed
     if (options.calculateGroundWind) {
@@ -275,27 +277,85 @@ module.exports = function (app) {
       groundWind.setAngleRange('0to2pi');
       outputs.push(groundWind);
       groundWind.setDisplayAttributes({ label: "Ground Wind", plane:"Ground" });
-      reportFull.addPolar(groundWind);
 
       groundSpeed = new Polar("groundSpeed", "navigation.speedOverGround", "navigation.courseOverGroundTrue", options.groundSpeedSource, options.groundSpeedSource);
       groundSpeed.subscribe(app, plugin.id, true, true, true, missingData);
       groundSpeedStat = new PolarDamped("groundSpeedDamped", groundSpeed, options.timeConstant);
       groundSpeed.onChange = () => { groundSpeedStat.sample();  }
       groundSpeedStat.setDisplayAttributes({ label: "Ground Speed", plane:"Ground" });
-      reportFull.addPolar(groundSpeedStat);
     }
 
     // calculated wind
     calculatedWind = new Polar("calculatedWind", "environment.wind.speedApparent", "environment.wind.angleApparent");
     if (options.backCalculateApparentWind) outputs.push(calculatedWind); {
-      calculatedWind.setDisplayAttributes({ label: "Calculated Apparent Wind", plane:"Boat" });
-      reportFull.addPolar(calculatedWind);
+      calculatedWind.setDisplayAttributes({ label: "Apparent Wind", plane:"Boat" });
     }
     //true wind
     trueWind = new Polar("trueWind", "environment.wind.speedTrue", "environment.wind.angleTrueWater");
     outputs.push(trueWind);
     trueWind.setDisplayAttributes({ label: "True Wind", plane:"Boat" });
+
+    // intermediate results
+    if (options.correctForMisalign) {
+      corrMisalign = new Polar("corrMisalign");
+      corrMisalign.setDisplayAttributes({ label: "Correct for sensor Misalignment", plane: "Boat" });
+    }
+    if (options.correctForUpwash) {
+      corrUpwash = new Polar("corrUpwash");
+      corrUpwash.setDisplayAttributes({ label: "Correct for Upwash", plane: "Boat" });
+    } 
+
+    if (options.correctForMastRotation) {
+      corrMastRotation = new Polar("corrMastRotation");
+      corrMastRotation.setDisplayAttributes({ label: "Correct for Mast Rotation", plane: "Boat" });
+    }
+
+    if (options.correctForMastHeel) {
+      corrMastHeel = new Polar("corrMastHeel");
+      corrMastHeel.setDisplayAttributes({ label: "Correct for Mast Heel", plane: "Boat" });
+    } 
+
+    if (options.correctForMastMovement) {
+      corrMastMovement = new Polar("corrMastMovement");
+      corrMastMovement.setDisplayAttributes({ label: "Correct for Mast Movement", plane: "Boat" });
+    }
+
+    if (options.correctForLeeway) {
+      corrLeeway = new Polar("corrLeeway");
+      corrLeeway.setDisplayAttributes({ label: "Correct for Leeway", plane: "Boat" });
+    }
+
+    if (options.correctForHeight) {
+      corrMastHeightTrue = new Polar("corrMastHeightTrue");
+      corrMastHeightTrue.setDisplayAttributes({ label: "True wind before mast height correction", plane: "Boat" });
+    }
+
+    //#endregion initialization of paths
+
+    //#region defining report
+    reportFull.addDelta(headingStat);
+    if (options.correctForMastRotation) reportFull.addDelta(mastStat);
+    if (options.correctForMastHeel || options.correctForMastMovement) reportFull.addAttitude(attitudeStat);
+    //if (options.correctForMastMovement) reportFull.addDelta(sensorSpeed);
+
+    reportFull.addPolar(apparentWindStat);
+    if (options.correctForMisalign) reportFull.addPolar(corrMisalign);
+    if (options.correctForMastRotation) reportFull.addPolar(corrMastRotation);
+    if (options.correctForMastHeel) reportFull.addPolar(corrMastHeel);
+    if (options.correctForMastMovement) reportFull.addPolar(corrMastMovement);
+    if (options.correctForUpwash) reportFull.addPolar(corrUpwash);
+    if (options.correctForLeeway) reportFull.addPolar(corrLeeway);
+    if (!options.correctForHeight) reportFull.addPolar(calculatedWind);
+    reportFull.addPolar(boatSpeedStat);
+    if (options.correctForHeight) reportFull.addPolar(corrMastHeightTrue);
     reportFull.addPolar(trueWind);
+    if (options.correctForHeight) reportFull.addPolar(calculatedWind);
+    if (options.calculateGroundWind) {
+      reportFull.addPolar(groundSpeedStat);
+      reportFull.addPolar(groundWind);
+    }
+
+    //#endregion defining report
 
     apparentWind.onChange = () => {
       apparentWindStat.sample();
@@ -316,20 +376,18 @@ module.exports = function (app) {
 
       if (options.correctForMisalign) {
         calculatedWind.rotate(-options.sensorMisalignment * Math.PI / 180);
+        corrMisalign.copyFrom(calculatedWind);
       }
 
-
-      if (options.correctForUpwash) {
-        calculatedWind.rotate(-approximateUpwash(calculatedWind.angle));
-      }
-
-      if (options.correctForLeeway) {
-        calculatedWind.rotate(-boatSpeedStat.angle);
+      if (options.correctForMastRotation) {
+        calculatedWind.rotate(-mastStat.value);
+        corrMastRotation.copyFrom(calculatedWind);
       }
 
       if (options.correctForMastHeel) {
         calculatedWind.xValue = calculatedWind.x / Math.cos(attitude.value.pitch);
         calculatedWind.yValue = calculatedWind.y / Math.cos(attitude.value.roll);
+        corrMastHeel.copyFrom(calculatedWind);
       }
 
       if (options.correctForMastMovement) {
@@ -338,14 +396,27 @@ module.exports = function (app) {
         const s = { x: rotation.pitch * r, y: rotation.roll * r };
         sensorSpeed.setVectorValue(s);
         calculatedWind.substract(sensorSpeed);
+        corrMastMovement.copyFrom(calculatedWind);
       }
 
-      if (options.correctForMastRotation) {
-        calculatedWind.rotate(-mastStat.value);
+
+
+      if (options.correctForUpwash) {
+        calculatedWind.rotate(-approximateUpwash(calculatedWind.angle));
+        corrUpwash.copyFrom(calculatedWind);
       }
+
+      if (options.correctForLeeway) {
+        calculatedWind.rotate(-boatSpeedStat.angle);
+        corrLeeway.copyFrom(calculatedWind);
+      }
+
+
+
       trueWind.copyFrom(calculatedWind);
       trueWind.substract(boatSpeedStat);
       if (options.correctForHeight) {
+        corrMastHeightTrue.copyFrom(trueWind);
         trueWind.scale(approximateWindGradient())
         calculatedWind.copyFrom(trueWind);
         calculatedWind.add(boatSpeedStat);
