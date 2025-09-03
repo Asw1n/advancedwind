@@ -26,7 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [2.2.0] - 2025-8-30
 ### Removed 
-- Leeway estimation. Tip: Get leeway from the Speed and Current plugin or the derived data plugin
+- Leeway estimation. Tip: Get leeway from the Speed and Current plugin or the Derived Data plugin
 ### Added
 - Oversampling and moving average for all input paths
 - options to set sourced (name.id) for all input paths
@@ -36,3 +36,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Ground wind speed and direction are calculated
 - Ground wind direction uses 0 to 2PI range instead of (-PI to PI)
 
+## [2.4.0] - ntb
+### Added
+- Effect of each individual correction is shown in the webapp
+- Visual indication of missing or stale inputs in the webapp
+### Fixed
+- Bug in removing duplicate apparent wind speed when writing back-calculated apparent wind speed

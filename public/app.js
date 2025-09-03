@@ -108,20 +108,26 @@ async function getFromServer(endpoint) {
     });
 
     if (!response.ok) {
-      if (response.status === 503) {
-        document.getElementById("message").innerHTML = "Plugin is not running";
-      } else {
-        document.getElementById("message").innerHTML = "Failed to fetch data. Error: " + response.status + " " + response.statusText;
+      switch (response.status) {
+        case 503:
+          document.getElementById("message").innerHTML = "Plugin is not running. Enable the plugin";
+          break;
+        case 401:
+          document.getElementById("message").innerHTML = "You are not logged on to the server. Log on to the server.";
+          break;
+        default:
+          document.getElementById("message").innerHTML = "Failed to fetch data. Error: " + response.status + " " + response.statusText;
+          break;
       }
-    }
-    else {
+      return null; // Prevent parsing JSON on error
+    } else {
       document.getElementById("message").innerHTML = "";
     }
 
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Failed to fetch data from server:", error);
+    console.error(error);
     document.getElementById("message").innerHTML = error;
     return null;
   }

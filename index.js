@@ -1,4 +1,5 @@
 const { MessageHandler, MessageHandlerDamped, Polar, PolarDamped, SI, Reporter } = require('signalkutilities');
+const path = require('path');
 
 module.exports = function (app) {
 
@@ -237,6 +238,7 @@ module.exports = function (app) {
 
   plugin.registerWithRouter = function (router) {
     app.debug('registerWithRouter');
+
 
     router.get('/getResults', (req, res) => {
       if (!isRunning) {

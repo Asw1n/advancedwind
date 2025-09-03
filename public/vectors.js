@@ -77,6 +77,36 @@ function drawVectors(canvas, data, heading, scale) {
 }
 
 
+function handleError(error) {
+  console.log('Error:', error.message);
+}
+
+async function getFromServer(endpoint) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      if (response.status === 503) {
+        handleError(new Error("Plugin is not running"));
+      } else {
+        handleError(new Error(`Error fetching data: ${response.status} ${response.statusText}`));
+      }
+      return null; // Prevent parsing JSON on error
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    handleError(error);
+    return null;
+  }
+}
+
 async function fetchVectorData() {
   const data = await getFromServer('getVectors');
   if (data) {
@@ -109,37 +139,6 @@ async function fetchVectorData() {
     drawBoat(canvas, heading);
     drawVectors(canvas, data, heading, scale);
   }
-
-  async function getFromServer(endpoint) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        if (response.status === 503) {
-          throw new Error("Plugin is not running");
-        } else {
-          throw new Error(`Error fetching data: ${response.statusText}`);
-        }
-      }
-      
-
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      handleError(error);
-      return null;
-    }
-  }
 }
-
-function handleError(error) {
-  console.log('Error:', error.message);
-}
-
 
 setInterval(fetchVectorData, 1000);
