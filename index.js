@@ -287,13 +287,13 @@ module.exports = function (app) {
     headingStat.setDisplayAttributes({ label: "Heading" });
     
     //mast rotation
-    if (corr.correctForMastRotation && ds.rotationPath) {
+    if (corr.correctForMastRotation ) {
       mast = new MessageHandler("mast", ds.rotationPath, ds.rotationSource);
       mast.subscribe(app, plugin.id, true, missingData);
       mastStat = new MessageHandlerDamped("mast", mast, param.timeConstant);
       mast.onChange = () => { mastStat.sample(); }
-      mast.value = 0;
-      mastStat.sample();
+      //mast.value = 0;
+      //mastStat.sample();
       mastStat.setDisplayAttributes({ label: "Mast Rotation" });
     }
 
@@ -428,12 +428,14 @@ module.exports = function (app) {
       calculatedWind.copyFrom(apparentWindStat);
 
       if (corr.correctForMisalign) {
-        calculatedWind.rotate(-param.sensorMisalignment * Math.PI / 180);
+        const misalignValue = isNaN(param.sensorMisalignment) ? 0 : param.sensorMisalignment;
+        calculatedWind.rotate(-misalignValue * Math.PI / 180);
         corrMisalign.copyFrom(calculatedWind);
       }
 
       if (corr.correctForMastRotation) {
-        calculatedWind.rotate(-mastStat.value);
+        const mastValue = isNaN(mastStat.value) ? 0 : mastStat.value;
+        calculatedWind.rotate(-mastValue);
         corrMastRotation.copyFrom(calculatedWind);
       }
 
