@@ -40,7 +40,6 @@ export function handleAngleUnitChange(value) {
 
 
 export function handleTableStyleChange(value) {
-  //console.log(value);
   if (value == "cartesian") {
     tableRenderer.setCellFormat(cartesian);
   }
@@ -168,6 +167,10 @@ function updatePolar(data) {
     if (polar.id) {
       row.id = polar.id;
     }
+    // Add stale class if displayAttributes.stale is true
+    if (polar.displayAttributes && polar.displayAttributes.stale) {
+      row.classList.add('stale');
+    }
     row.innerHTML = `<td>${polar.displayAttributes.label}</td><td>${cSpeed(polar.magnitude)}</td><td>${cAngle(polar.angle)}</td>`;
     table.appendChild(row);
   });
@@ -189,6 +192,10 @@ function updateDelta(data) {
     const row = document.createElement('tr');
     if (delta.id) {
       row.id = delta.id;
+    }
+    // Add stale class if displayAttributes.stale is true
+    if (delta.displayAttributes && delta.displayAttributes.stale) {
+      row.classList.add('stale');
     }
     row.innerHTML = `<td>${delta.displayAttributes.label}</td><td>${cAngle(delta.value)}</td>`;
     table.appendChild(row);
@@ -235,7 +242,6 @@ function updateTable(data) {
 async function fetchAndUpdateData() {
   const data = await getFromServer('getResults'); // Updated endpoint
   if (data) {
-    console.log(data);
     //updateOptions(data);
     updatePolar(data);
     updateAttitude(data);

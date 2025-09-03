@@ -261,12 +261,15 @@ module.exports = function (app) {
   }
 
 
-  plugin.start = (opts) => {
-    app.debug("plugin started, development version");
+  plugin.start = (options) => {
+    app.debug("plugin started");
     app.setPluginStatus("Starting");
-    options = opts;
     const outputs = [];
     reportFull = new Reporter();
+    let lastTime = null;
+    let previous = null;
+
+
 
     // Helper to access nested options
     const ds = options.dataSources || {};
@@ -345,7 +348,7 @@ module.exports = function (app) {
     outputs.push(trueWind);
     trueWind.setDisplayAttributes({ label: "True Wind", plane:"Boat" });
 
-    // intermediate results
+    //#region intermediate results
     if (corr.correctForMisalign) {
       corrMisalign = new Polar("corrMisalign");
       corrMisalign.setDisplayAttributes({ label: "Correct for sensor Misalignment", plane: "Boat" });
@@ -379,6 +382,8 @@ module.exports = function (app) {
       corrMastHeightTrue = new Polar("corrMastHeightTrue");
       corrMastHeightTrue.setDisplayAttributes({ label: "True wind before mast height correction", plane: "Boat" });
     }
+
+    //#endregion intermediate results
 
     //#endregion initialization of paths
 
@@ -418,6 +423,8 @@ module.exports = function (app) {
     }
 
     function calculate() {
+
+
       calculatedWind.copyFrom(apparentWindStat);
 
       if (corr.correctForMisalign) {
@@ -470,38 +477,38 @@ module.exports = function (app) {
       }
 
       Polar.send(app, plugin.id, outputs);
-    }
 
-    function approximateUpwash(angle) {
-      return (param.upwashSlope * angle + param.upwashOffset * Math.PI / 180) * Math.max(0, Math.cos(angle));
-    }
+      function approximateUpwash(angle) {
+        return (param.upwashSlope * angle + param.upwashOffset * Math.PI / 180) * Math.max(0, Math.cos(angle));
+      }
 
-    function approximateWindGradient() {
-      return Math.pow((10 / param.heightAboveWater), param.windExponent);
-    }
+      function approximateWindGradient() {
+        return Math.pow((10 / param.heightAboveWater), param.windExponent);
+      }
 
-    let lastTime = null;
-    let previous = null;
-    function calculateRotation(current) {
-      let speed = { roll: 0, pitch: 0, yaw: 0 };
-      if (!lastTime) {
-        lastTime = Date.now();
+      function calculateRotation(current) {
+        let speed = { roll: 0, pitch: 0, yaw: 0 };
+        if (!lastTime) {
+          lastTime = Date.now();
+          previous = { ...current };
+          return speed;
+        }
+        let now = Date.now();
+        let deltaT = (now - lastTime) / 1000;
+        lastTime = now;
+        if (deltaT > 0) {
+          speed = {
+            roll: (current.roll - previous.roll) / deltaT,
+            pitch: (current.pitch - previous.pitch) / deltaT,
+            yaw: (current.yaw - previous.yaw) / deltaT
+          };
+        }
         previous = { ...current };
         return speed;
-      }
-      let now = Date.now();
-      let deltaT = (now - lastTime) / 1000;
-      lastTime = now;
-      if (deltaT > 0) {
-        speed = {
-          roll: (current.roll - previous.roll) / deltaT,
-          pitch: (current.pitch - previous.pitch) / deltaT,
-          yaw: (current.yaw - previous.yaw) / deltaT
-        };
-      }
-      previous = { ...current };
-      return speed;
+      }      
     }
+
+
   }
 
 

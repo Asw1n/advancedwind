@@ -114,6 +114,10 @@ th, td {
 .emptyCell {
 }
 
+.stale {
+  background-color: orangered;
+}
+
 /* --- SVG Styling --- */
 svg {
   border: 1px solid #ccc;
