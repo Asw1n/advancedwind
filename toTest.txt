@@ -1,0 +1,4 @@
+plugin
+
+webapp
+- error handling while not logged in
