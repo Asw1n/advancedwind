@@ -1,4 +1,4 @@
-const { MessageHandler, MessageHandlerDamped, Polar, PolarDamped, SI, Reporter } = require('signalkutilities');
+const { MessageHandler, MessageHandlerDamped, Polar, PolarDamped, Reporter, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother, MessageSmoother, createSmoothedPolar, createSmoothedHandler } = require('signalkutilities');
 const path = require('path');
 
 module.exports = function (app) {
@@ -219,21 +219,15 @@ module.exports = function (app) {
 
   let reportFull = null;
   let heading = null;
-  let headingStat = null;
   let mast = null;
-  let mastStat = null;
   let attitude = null;
-  let attitudeStat = null;
   let sensorSpeed = null;
   let boatSpeed = null;
-  let boatSpeedStat = null;
   let groundSpeed = null;
-  let groundSpeedStat = null;
   let groundWind = null;
   let calculatedWind = null;
   let trueWind = null;
   let apparentWind = null;
-  let apparentWindStat = null;
 
 
   plugin.registerWithRouter = function (router) {
@@ -270,87 +264,125 @@ module.exports = function (app) {
     reportFull = new Reporter();
     let lastTime = null;
     let previous = null;
-
-
-
-    // Helper to access nested options
     const ds = options.dataSources || {};
     const corr = options.corrections || {};
     const out = options.outputOptions || {};
     const param = options.parameters || {};
+    let smootherOptions = { timeConstant: param.timeConstant, processVariance: 1, measurementVariance: 4, timeSpan: 1 };
 
-    //#region initialization of paths
     // heading
-    heading = new MessageHandler("heading", "navigation.headingTrue", ds.headingSource);
-    heading.subscribe(app, plugin.id, true, missingData);
-    headingStat = new MessageHandlerDamped("heading", heading, param.timeConstant);
-    heading.onChange = () => { headingStat.sample(); }
+    heading = createSmoothedHandler({
+      id: "heading",
+      path: "navigation.headingTrue",
+      source: ds.headingSource,
+      subscribe: true,
+      app,
+      pluginId: plugin.id,
+      SmootherClass: KalmanSmoother,
+      smootherOptions: smootherOptions,
+      displayAttributes: { label: "Heading" },
+    });
 
-    headingStat.setDisplayAttributes({ label: "Heading" });
-    
     //mast rotation
-    if (corr.correctForMastRotation ) {
-      mast = new MessageHandler("mast", ds.rotationPath, ds.rotationSource);
-      mast.subscribe(app, plugin.id, true, missingData);
-      mastStat = new MessageHandlerDamped("mast", mast, param.timeConstant);
-      mast.onChange = () => { mastStat.sample(); }
-      //mast.value = 0;
-      //mastStat.sample();
-      mastStat.setDisplayAttributes({ label: "Mast Rotation" });
+    if (corr.correctForMastRotation) {
+      mast = createSmoothedHandler({
+        id: "mast",
+        path: ds.rotationPath,
+        source: ds.rotationSource,
+        subscribe: true,
+        app,
+        pluginId: plugin.id,
+        SmootherClass: KalmanSmoother,
+        smootherOptions: smootherOptions,
+        displayAttributes: { label: "Mast Rotation" },
+      });
     }
 
     //attitude
     if (corr.correctForMastMovement || corr.correctForMastHeel) {
-      attitude = new MessageHandler("attitude", "navigation.attitude", ds.attitudeSource);
-      attitude.value = { pitch: 0, roll: 0, yaw: 0 };
-      attitude.subscribe(app, plugin.id, true, missingData);
-      attitudeStat = new MessageHandlerDamped("attitude", attitude, param.timeConstant);
-      attitudeStat.sample();
-      attitude.onChange = () => { attitudeStat.sample(); }
-      attitudeStat.setDisplayAttributes({ label: "Attitude" });
+      attitude = createSmoothedHandler({
+        id: "attitude",
+        path: "navigation.attitude",
+        source: ds.attitudeSource,
+        subscribe: true,
+        app,
+        pluginId: plugin.id,
+        SmootherClass: KalmanSmoother,
+        smootherOptions: smootherOptions,
+        displayAttributes: { label: "Attitude" }
+      });
       sensorSpeed = new Polar("sensorSpeed");
-      sensorSpeed.setDisplayAttributes({ label: "Speed of sensor", plane:"Boat" });
+      sensorSpeed.setDisplayAttributes({ label: "Speed of sensor", plane: "Boat" });
     }
 
     //apparent wind
-    apparentWind = new Polar("apparentWind", "environment.wind.speedApparent", "environment.wind.angleApparent", ds.apparentWindSource, ds.apparentWindSource);
-    apparentWind.subscribe(app, plugin.id, true, true, !out.preventDuplication, missingData);
-    apparentWindStat = new PolarDamped("apparentWind", apparentWind, param.timeConstant, param.timeConstant);
-    apparentWind.onChange = () => { apparentWindStat.sample(); }
-    apparentWindStat.setDisplayAttributes({ label: "Observed apparent Wind", plane:"Boat" });
+    apparentWind = createSmoothedPolar({
+      id: "apparentWind",
+      pathMagnitude: "environment.wind.speedApparent",
+      pathAngle: "environment.wind.angleApparent",
+      subscribe: true,
+      sourceMagnitude: ds.apparentWindSource,
+      sourceAngle: ds.apparentWindSource,
+      app,
+      pluginId: plugin.id,
+      SmootherClass: KalmanSmoother,
+      smootherOptions: smootherOptions,
+      displayAttributes: { label: "Observed apparent Wind", plane: "Boat" },
+      passOn: !out.preventDuplication,
+    });
+
 
     // boat speed
-    boatSpeed = new Polar("boatSpeed", "navigation.speedThroughWater", corr.correctForLeeway ? "navigation.leewayAngle" : ds.boatSpeedSource, ds.boatSpeedSource);
-    boatSpeed.subscribe(app, plugin.id, true, corr.correctForLeeway, missingData);
-    boatSpeedStat = new PolarDamped("boatSpeed", boatSpeed, param.timeConstant);
-    boatSpeed.onChange = () => { boatSpeedStat.sample(); }
-    boatSpeedStat.setDisplayAttributes({ label: "Boat Speed", plane:"Boat" });
+    boatSpeed = createSmoothedPolar({
+      id: "boatSpeed",
+      pathMagnitude: "navigation.speedThroughWater",
+      pathAngle: corr.correctForLeeway ? "navigation.leewayAngle" : null,
+      subscribe: true,
+      sourceMagnitude: ds.boatSpeedSource,
+      sourceAngle: ds.boatSpeedSource,
+      app,
+      pluginId: plugin.id,
+      SmootherClass: KalmanSmoother,
+      smootherOptions: smootherOptions,
+      displayAttributes: { label: "Boat Speed", plane: "Boat" },
+      passOn: true,
+    });
 
     // ground wind and ground speed
     if (out.calculateGroundWind) {
       groundWind = new Polar("groundWind", "environment.wind.speedOverGround", "environment.wind.directionTrue");
       groundWind.setAngleRange('0to2pi');
       outputs.push(groundWind);
-      groundWind.setDisplayAttributes({ label: "Ground Wind", plane:"Ground" });
+      groundWind.setDisplayAttributes({ label: "Ground Wind", plane: "Ground" });
 
-      groundSpeed = new Polar("groundSpeed", "navigation.speedOverGround", "navigation.courseOverGroundTrue", ds.groundSpeedSource, ds.groundSpeedSource);
-      groundSpeed.subscribe(app, plugin.id, true, true, true, missingData);
-      groundSpeedStat = new PolarDamped("groundSpeedDamped", groundSpeed, param.timeConstant);
-      groundSpeed.onChange = () => { groundSpeedStat.sample();  }
-      groundSpeedStat.setDisplayAttributes({ label: "Ground Speed", plane:"Ground" });
+      groundSpeed = createSmoothedPolar({
+        id: "groundSpeed",
+        pathMagnitude: "navigation.speedOverGround",
+        pathAngle: "navigation.courseOverGroundTrue",
+        subscribe: true,
+        sourceMagnitude: ds.groundSpeedSource,
+        sourceAngle: ds.groundSpeedSource,
+        app,
+        pluginId: plugin.id,
+        SmootherClass: KalmanSmoother,
+        smootherOptions: smootherOptions,
+        displayAttributes: { label: "Ground Speed", plane: "Ground" },
+        passOn: true,
+        angleRange: '0to2pi'
+      });
     }
 
     // calculated wind
     calculatedWind = new Polar("calculatedWind", "environment.wind.speedApparent", "environment.wind.angleApparent");
     if (out.backCalculateApparentWind) outputs.push(calculatedWind);
-    calculatedWind.setDisplayAttributes({ label: "Apparent Wind", plane:"Boat" });
+    calculatedWind.setDisplayAttributes({ label: "Apparent Wind", plane: "Boat" });
 
     //true wind
     trueWind = new Polar("trueWind", "environment.wind.speedTrue", "environment.wind.angleTrueWater");
     outputs.push(trueWind);
-    trueWind.setDisplayAttributes({ label: "True Wind", plane:"Boat" });
+    trueWind.setDisplayAttributes({ label: "True Wind", plane: "Boat" });
 
-    //#region intermediate results
+    // #region intermediate results
     if (corr.correctForMisalign) {
       corrMisalign = new Polar("corrMisalign");
       corrMisalign.setDisplayAttributes({ label: "Correct for sensor Misalignment", plane: "Boat" });
@@ -358,7 +390,7 @@ module.exports = function (app) {
     if (corr.correctForUpwash) {
       corrUpwash = new Polar("corrUpwash");
       corrUpwash.setDisplayAttributes({ label: "Correct for Upwash", plane: "Boat" });
-    } 
+    }
 
     if (corr.correctForMastRotation) {
       corrMastRotation = new Polar("corrMastRotation");
@@ -368,7 +400,7 @@ module.exports = function (app) {
     if (corr.correctForMastHeel) {
       corrMastHeel = new Polar("corrMastHeel");
       corrMastHeel.setDisplayAttributes({ label: "Correct for Mast Heel", plane: "Boat" });
-    } 
+    }
 
     if (corr.correctForMastMovement) {
       corrMastMovement = new Polar("corrMastMovement");
@@ -385,16 +417,16 @@ module.exports = function (app) {
       corrMastHeightTrue.setDisplayAttributes({ label: "True wind before mast height correction", plane: "Boat" });
     }
 
-    //#endregion intermediate results
+    //# endregion intermediate results
 
-    //#endregion initialization of paths
+    //# endregion initialization of paths
 
-    //#region defining report
-    reportFull.addDelta(headingStat);
-    if (corr.correctForMastRotation) reportFull.addDelta(mastStat);
-    if (corr.correctForMastHeel || corr.correctForMastMovement) reportFull.addAttitude(attitudeStat);
+    //# region defining report
+    reportFull.addDelta(heading);
+    if (corr.correctForMastRotation) reportFull.addDelta(mast);
+    if (corr.correctForMastHeel || corr.correctForMastMovement) reportFull.addAttitude(attitude);
 
-    reportFull.addPolar(apparentWindStat);
+    reportFull.addPolar(apparentWind);
     if (corr.correctForMisalign) reportFull.addPolar(corrMisalign);
     if (corr.correctForMastRotation) reportFull.addPolar(corrMastRotation);
     if (corr.correctForMastHeel) reportFull.addPolar(corrMastHeel);
@@ -402,32 +434,30 @@ module.exports = function (app) {
     if (corr.correctForUpwash) reportFull.addPolar(corrUpwash);
     if (corr.correctForLeeway) reportFull.addPolar(corrLeeway);
     if (!corr.correctForHeight) reportFull.addPolar(calculatedWind);
-    reportFull.addPolar(boatSpeedStat);
+    reportFull.addPolar(boatSpeed);
     if (corr.correctForHeight) reportFull.addPolar(corrMastHeightTrue);
     reportFull.addPolar(trueWind);
     if (corr.correctForHeight) reportFull.addPolar(calculatedWind);
     if (out.calculateGroundWind) {
-      reportFull.addPolar(groundSpeedStat);
+      reportFull.addPolar(groundSpeed);
       reportFull.addPolar(groundWind);
     }
     //#endregion defining report
 
     apparentWind.onChange = () => {
-      apparentWindStat.sample();
       calculate();
     };
+
     isRunning = true;
     app.debug("Start wind calculations");
     app.setPluginStatus("Running");
 
-    function missingData(handler) {
-      //app.debug(`Missing data for ${handler.path}`);
-    }
+
 
     function calculate() {
 
 
-      calculatedWind.copyFrom(apparentWindStat);
+      calculatedWind.copyFrom(apparentWind);
 
       if (corr.correctForMisalign) {
         const misalignValue = isNaN(param.sensorMisalignment) ? 0 : param.sensorMisalignment;
@@ -436,7 +466,7 @@ module.exports = function (app) {
       }
 
       if (corr.correctForMastRotation) {
-        const mastValue = isNaN(mastStat.value) ? 0 : mastStat.value;
+        const mastValue = isNaN(mast.value) ? 0 : mast.value;
         calculatedWind.rotate(-mastValue);
         corrMastRotation.copyFrom(calculatedWind);
       }
@@ -448,7 +478,7 @@ module.exports = function (app) {
       }
 
       if (corr.correctForMastMovement) {
-        const rotation = calculateRotation(attitudeStat.value);
+        const rotation = calculateRotation(attitude.value);
         const r = param.heightAboveWater;
         const s = { x: rotation.pitch * r, y: rotation.roll * r };
         sensorSpeed.setVectorValue(s);
@@ -462,17 +492,17 @@ module.exports = function (app) {
       }
 
       if (corr.correctForLeeway) {
-        calculatedWind.rotate(-boatSpeedStat.angle);
+        calculatedWind.rotate(-boatSpeed.angle);
         corrLeeway.copyFrom(calculatedWind);
       }
 
       trueWind.copyFrom(calculatedWind);
-      trueWind.substract(boatSpeedStat);
+      trueWind.substract(boatSpeed);
       if (corr.correctForHeight) {
         corrMastHeightTrue.copyFrom(trueWind);
         trueWind.scale(approximateWindGradient());
         calculatedWind.copyFrom(trueWind);
-        calculatedWind.add(boatSpeedStat);
+        calculatedWind.add(boatSpeed);
       }
       if (out.calculateGroundWind) {
         groundWind.copyFrom(calculatedWind);
@@ -509,7 +539,7 @@ module.exports = function (app) {
         }
         previous = { ...current };
         return speed;
-      }      
+      }
     }
 
 
@@ -521,25 +551,14 @@ module.exports = function (app) {
     return new Promise((resolve, reject) => {
       try {
         isRunning = false;
-        reportFull = null;
-        heading = heading?.terminate(app);
-        headingStat = null;
         options = {};
         reportFull = null;
-        //heading = null;
+        heading = heading?.terminate(app);
         mast = mast?.terminate(app);
-        mastStat = null;
         attitude = attitude?.terminate(app);
-        attitudeStat = null;
         sensorSpeed = sensorSpeed?.terminate(app);
         boatSpeed = boatSpeed?.terminate(app);
-        boatSpeedStat = null;
         groundSpeed = groundSpeed?.terminate(app);
-        groundSpeedStat = null;
-        apparentWind = apparentWind?.terminate(app);
-        apparentWindStat = null;
-        calculatedWind = calculatedWind?.terminate(app);
-        trueWind = trueWind?.terminate(app) ;
         app.debug("plugin stopped");
         app.setPluginStatus("Stopped");
         resolve();
