@@ -1,4 +1,4 @@
-const { MessageHandler, MessageHandlerDamped, Polar, PolarDamped, Reporter, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother, MessageSmoother, createSmoothedPolar, createSmoothedHandler } = require('signalkutilities');
+const {   Polar, Reporter, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother, MessageSmoother, createSmoothedPolar, createSmoothedHandler } = require('signalkutilities');
 const path = require('path');
 
 module.exports = function (app) {
@@ -471,13 +471,13 @@ module.exports = function (app) {
         corrMastRotation.copyFrom(calculatedWind);
       }
 
-      if (corr.correctForMastHeel) {
+      if (corr.correctForMastHeel && attitude.n > 0) {
         calculatedWind.xValue = calculatedWind.x / Math.cos(attitude.value.pitch);
         calculatedWind.yValue = calculatedWind.y / Math.cos(attitude.value.roll);
         corrMastHeel.copyFrom(calculatedWind);
       }
 
-      if (corr.correctForMastMovement) {
+      if (corr.correctForMastMovement && attitude.n > 0) {
         const rotation = calculateRotation(attitude.value);
         const r = param.heightAboveWater;
         const s = { x: rotation.pitch * r, y: rotation.roll * r };
