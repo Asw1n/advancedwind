@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advanced Wind - Insight</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="main.css">
+</head>
+
+<body>
+  <header class="menu-bar">
+    <div class="menu-brand">
+      <img src="icon.png" alt="Advanced Wind" class="menu-logo">
+      <span class="menu-title">Advanced Wind</span>
+    </div>
+    <div id="message" class="menu-message"></div>
+  </header>
+
+  <div class="app-body">
+    <aside id="insight-nav" class="insight-nav"></aside>
+
+    <main class="content-area">
+      <div class="content-card">
+        <div class="card-subtitle" id="insight-title">Overview</div>
+        <section class="insight-scene">
+          <div class="insight-scene-columns">
+            <div class="insight-scene-canvas">
+              <canvas id="insight-canvas"></canvas>
+            </div>
+            <div class="insight-scene-panel">
+              <div id="insight-panel">
+                <p id="panel-description" class="scene-description"></p>
+                <div id="panel-enable"></div>
+                <div id="panel-settings"></div>
+                <div id="panel-inputs"></div>
+                <div id="panel-outputs"></div>
+                <div id="panel-warnings"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="insight.js"></script>
+</body>
+
+</html>

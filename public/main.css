@@ -139,59 +139,126 @@ line {
 
 /* --- Menu and Layout --- */
 body {
-  font-family: Arial, sans-serif;
-  display: flex;
-  flex-direction: column;
-  margin: 15px 15px 15px 15px;
+  font-family: 'Roboto', Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #E4E5E6;
+  color: #212121;
 }
+
+/* ---- Top Navigation Bar ---- */
 .menu-bar {
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
-  background: #6a6a6a;
-  color: black;
+  height: 56px;
+  background: #ffffff;
   display: flex;
   align-items: center;
-  padding: 10px 20px;
-  gap: 20px;
-  box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.2);
+  justify-content: space-between;
+  padding: 0 20px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
   z-index: 1000;
+  box-sizing: border-box;
 }
-.menu-item {
+.menu-brand {
   display: flex;
   align-items: center;
-  gap: 5px;
-  cursor: pointer;
+  gap: 12px;
 }
-.menu-item label {
+.menu-logo {
+  height: 34px;
+  width: auto;
+}
+.menu-title {
+  font-size: 18px;
+  font-weight: 500;
+  color: #003399;
+  letter-spacing: 0.02em;
+}
+.menu-message {
+  font-size: 13px;
+  color: #c62828;
+  font-weight: 400;
+}
+
+/* ---- Application Body (sidebar + content) ---- */
+.app-body {
+  display: flex;
+  min-height: calc(100vh - 56px);
+  margin-top: 56px;
+}
+
+/* ---- Left Sidebar Navigation ---- */
+.insight-nav {
+  flex: 0 0 180px;
+  background: #29363D;
+  display: flex;
+  flex-direction: column;
+  padding-top: 8px;
+  min-height: calc(100vh - 56px);
+}
+.insight-nav .nav-item {
+  display: block;
+  padding: 11px 20px;
+  color: #ffffff;
   font-size: 14px;
-  color: black;
-}
-.menu-item select {
-  background: transparent;
-  border: 1px solid #888;
-  color: black;
-  font-size: 14px;
-  appearance: none;
-  padding-right: 15px;
+  font-weight: 400;
   cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.15s;
+  user-select: none;
 }
-.menu-item select::-ms-expand {
-  display: none;
+.insight-nav .nav-item:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
-#toggle-updates {
-  background: transparent;
-  border: 1px solid #888;
-  padding: 5px 15px;
+.insight-nav .nav-item.active-step {
+  background: #33444C;
+  border-left-color: #00bcd4;
+  color: #ffffff;
+  font-weight: 500;
+}
+
+/* ---- Main Content Area ---- */
+.content-area {
+  flex: 1 1 auto;
+  padding: 24px;
+  overflow: auto;
+}
+
+/* ---- White Content Card ---- */
+.content-card {
+  background: #ffffff;
   border-radius: 4px;
-  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
+  overflow: hidden;
 }
-#toggle-updates:hover {
-  background: #555;
+.card-subtitle {
+  padding: 12px 24px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #212121;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid #d0d4d8;
+  background: #F0F3F5;
 }
-.content {
-  margin-top: 60px;
+
+/* ---- Insight Scene (inside card) ---- */
+.insight-scene {
+  padding: 24px;
+}
+.insight-scene-columns {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+.insight-scene-canvas {
+  flex: 1 1 50%;
+}
+.insight-scene-panel {
+  flex: 1 1 50%;
 }
 .surfacePlot {
   width: 100%;
@@ -200,4 +267,77 @@ body {
   padding: 0;
   margin: 0;
   position: relative;
+}
+
+/* --- Insight scene panel --- */
+.scene-description {
+  margin: 0 0 12px 0;
+  color: #444;
+  font-size: 14px;
+}
+
+.scene-enable {
+  margin-bottom: 12px;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.scene-enable label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.scene-section-heading {
+  margin: 14px 0 4px 0;
+  font-size: 13px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #555;
+  border-bottom: 1px solid #ccc;
+  padding-bottom: 2px;
+}
+
+.scene-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.scene-table td,
+.scene-table th {
+  border: none;
+  padding: 3px 6px;
+  vertical-align: middle;
+}
+
+.scene-table tr:nth-child(even) {
+  background-color: #f5f5f5;
+}
+
+.scene-table td:first-child {
+  color: #333;
+  width: 55%;
+}
+
+.scene-table td:last-child {
+  font-family: monospace;
+}
+
+.scene-number-input {
+  width: 80px;
+}
+
+.scene-text-input {
+  width: 180px;
+}
+
+.scene-warnings {
+  margin: 4px 0 0 0;
+  padding-left: 20px;
+  color: #c62828;
+  font-size: 13px;
 }
