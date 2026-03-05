@@ -1,7 +1,129 @@
 const API_BASE_URL = "/plugins/advancedwind";
 
-let canvas;
-let ctx;
+// SVG-based boat graphic (mirrors vectors.js approach)
+let svgCanvas = null;
+
+// Auto-scale state (exponential smoothing, same as vectors.js)
+let _scalePrev = 0;
+
+function _getLargest(polars) {
+  let largest = 1;
+  polars.forEach(p => {
+    largest = Math.max(largest, Math.abs(p.x || 0));
+    largest = Math.max(largest, Math.abs(p.y || 0));
+  });
+  return largest;
+}
+
+function _smoothScale(largest) {
+  if (_scalePrev === 0 || largest > _scalePrev) {
+    _scalePrev = largest;        // snap out immediately so nothing clips
+  } else {
+    _scalePrev *= 0.9995;        // ease in slowly when vectors shrink
+  }
+  return 95 / _scalePrev;
+}
+
+function _svgEl(tag, attrs) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+
+function _drawBoat(svg, heading) {
+  const hull = _svgEl("path", {
+    d: "M -45 8  Q 15 20 30 0 Q 15 -20 -45 -8 z",
+    fill: "none",
+    stroke: "black",
+    "stroke-width": "1",
+    id: "hull"
+  });
+  const boat = _svgEl("g", { transform: `rotate(${heading - 90})` });
+  boat.appendChild(hull);
+  svg.appendChild(boat);
+}
+
+function _drawVectors(svg, polars, heading, scale) {
+  polars.forEach(polar => {
+    const vector = _svgEl("line", {
+      x1: 0,
+      y1: 0,
+      x2: (polar.x || 0) * scale,
+      y2: (polar.y || 0) * scale,
+      id: polar.id
+    });
+
+    let dash;
+    let s = scale * 5 / 1.94384 - 1;
+    if (s > 50) {
+      s = s / 5;
+      dash = `1 1 ${s - 1} 1 ${s} 1 ${s} 1 ${s} 1 ${s - 1} 1 `;
+    } else {
+      dash = `1 1 ${s - 1} 1 ${s} 1 `;
+    }
+    vector.setAttribute("stroke-dasharray", dash);
+    vector.setAttribute("stroke-dashoffset", "1");
+
+    const plane = polar.displayAttributes && polar.displayAttributes.plane;
+    vector.setAttribute("transform",
+      plane === "Ground" ? "rotate(-90)" : `rotate(${heading - 90})`);
+
+    svg.appendChild(vector);
+  });
+}
+
+function renderSVG() {
+  const svg = document.getElementById("insight-canvas");
+  if (!svg) return;
+  svg.innerHTML = "";
+
+  const cfg = config || {};
+
+  // Whitelist: only draw polars that are genuinely active.
+  // boatSpeed polar is suppressed here and redrawn as a scalar below.
+  const GRAPH_WHITELIST = new Set(["apparentWind", "trueWind"]);
+  if (cfg.calculateGroundWind) {
+    GRAPH_WHITELIST.add("groundWind");
+    GRAPH_WHITELIST.add("groundSpeed");
+  }
+  const polars = Object.values(state.polarsById).filter(p => GRAPH_WHITELIST.has(p.id));
+  const headingDelta = state.deltasById["heading"];
+  const heading = headingDelta ? headingDelta.value * 180 / Math.PI : 0;
+
+  // Include boatSpeed scalar in scale calculation so it never clips.
+  const boatSpeedDelta = state.deltasById["boatSpeed"];
+  const boatSpeedVal   = boatSpeedDelta ? (boatSpeedDelta.value || 0) : 0;
+
+  let largest = Math.max(_getLargest(polars), Math.abs(boatSpeedVal));
+  if (largest < 1) largest = 1;
+  const scale = _smoothScale(largest);
+
+  _drawBoat(svg, heading);
+  _drawVectors(svg, polars, heading, scale);
+
+  // Draw boatSpeed as a pure forward vector (no leeway component).
+  if (boatSpeedVal > 0) {
+    const len = boatSpeedVal * scale;
+    let dash;
+    let s = scale * 5 / 1.94384 - 1;
+    if (s > 50) {
+      s = s / 5;
+      dash = `1 1 ${s - 1} 1 ${s} 1 ${s} 1 ${s} 1 ${s - 1} 1 `;
+    } else {
+      dash = `1 1 ${s - 1} 1 ${s} 1 `;
+    }
+    const v = _svgEl("line", {
+      x1: 0, y1: 0,
+      x2: len, y2: 0,        // forward = +x in boat frame
+      id: "boatSpeed",
+      "stroke-dasharray": dash,
+      "stroke-dashoffset": "1",
+      transform: `rotate(${heading - 90})`
+    });
+    svg.appendChild(v);
+  }
+}
+
 let state = {
   polarsById: {},
   deltasById: {},
@@ -144,9 +266,9 @@ function getConfigValue(key) {
 const paramMeta = {
   sensorMisalignment:        { label: "Sensor misalignment",                    unit: "°",  type: "number",  step: 0.1 },
   heightAboveWater:          { label: "Sensor height above water",               unit: "m",  type: "number",  step: 0.5, min: 0 },
-  windExponent:              { label: "Wind gradient exponent (α)",              unit: "",   type: "number",  step: 0.01, min: 0.05, max: 0.5 },
-  upwashSlope:               { label: "Upwash slope (α)",                        unit: "",   type: "number",  step: 0.01, min: 0, max: 0.3 },
-  upwashOffset:              { label: "Upwash offset (β)",                       unit: "°",  type: "number",  step: 0.1,  min: -1, max: 4 },
+  windExponent:              { label: "Wind gradient exponent (α)",              unit: "",   type: "number",  step: 0.01, min: 0.05, max: 0.5, default: 0.14 },
+  upwashSlope:               { label: "Upwash slope (α)",                        unit: "",   type: "number",  step: 0.01, min: 0, max: 0.3, default: 0.05 },
+  upwashOffset:              { label: "Upwash offset (β)",                       unit: "°",  type: "number",  step: 0.1,  min: -1, max: 4, default: 1.5 },
   timeConstant:              { label: "Smoothing time constant",                 unit: "s",  type: "number",  step: 0.5,  min: 0, max: 10 },
   headingSource:             { label: "Heading source",        path: "navigation.headingTrue",              unit: "",   type: "string", sourceOf: { type: "delta",    id: "heading" } },
   attitudeSource:            { label: "Attitude source",       path: "navigation.attitude",                 unit: "",   type: "string", sourceOf: { type: "attitude", id: "attitude" } },
@@ -172,16 +294,27 @@ const stepConfigs = {
     description: "High-level view of the calculation pipeline: what goes in and what comes out.",
     correctionFlag: null,
     parameters: [],
-    inputs:  [
-      { type: "polar", id: "apparentWind" },
-      { type: "delta", id: "boatSpeed" },
-      { type: "delta", id: "heading" }
-    ],
-    outputs: [
-      { type: "polar", id: "trueWind" },
-      { type: "polar", id: "calculatedWind" },
-      { type: "polar", id: "groundWind" }
-    ]
+    inputs: (cfg) => {
+      const items = [
+        { type: "polar", id: "apparentWind" },
+        { type: "delta", id: "boatSpeed" }
+      ];
+      if (cfg.correctForMastHeel || cfg.correctForMastMovement)
+        items.push({ type: "attitude", id: "attitude" });
+      if (cfg.calculateGroundWind) {
+        items.push({ type: "delta",  id: "heading" });
+        items.push({ type: "polar", id: "groundSpeed" });
+      }
+      return items;
+    },
+    outputs: (cfg) => {
+      const items = [ { type: "polar", id: "trueWind" } ];
+      if (cfg.backCalculateApparentWind)
+        items.push({ type: "polar", id: "backCalcOut" });
+      if (cfg.calculateGroundWind)
+        items.push({ type: "polar", id: "groundWind" });
+      return items;
+    }
   },
   inputs: {
     description: "Start of the calculation pipeline. The observed apparent wind enters here. Configure the Signal K source to use for wind measurements.",
@@ -233,11 +366,11 @@ const stepConfigs = {
     parameters: ["heightAboveWater", "attitudeSource"],
     inputs:  [
       { type: "polar",    id: "mastMoveIn" },
-      { type: "attitude", id: "attitude" }
+      { type: "attitude", id: "attitude" },
+      { type: "polar",    id: "sensorSpeed" }
     ],
     outputs: [
-      { type: "polar", id: "mastMoveOut" },
-      { type: "polar", id: "sensorSpeed" }
+      { type: "polar", id: "mastMoveOut" }
     ]
   },
   upwash: {
@@ -315,185 +448,18 @@ const stepConfigs = {
   outputs: {
     description: "End of the pipeline. Configure which values are written to Signal K.",
     correctionFlag: null,
-    parameters: [
-      "calculateGroundWind"
-    ],
-    inputs:  [
-      { type: "polar", id: "trueWind" },
-      { type: "polar", id: "calculatedWind" },
-      { type: "polar", id: "groundWind" }
-    ],
+    parameters: [],
+    inputs: (cfg) => {
+      const items = [ { type: "polar", id: "trueWind" } ];
+      if (cfg.backCalculateApparentWind)
+        items.push({ type: "polar", id: "backCalcOut" });
+      if (cfg.calculateGroundWind)
+        items.push({ type: "polar", id: "groundWind" });
+      return items;
+    },
     outputs: []
   }
 };
-
-function setupCanvas() {
-  canvas = document.getElementById("insight-canvas");
-  if (!canvas) return;
-  ctx = canvas.getContext("2d");
-  resizeCanvas();
-  window.addEventListener("resize", resizeCanvas);
-}
-
-function resizeCanvas() {
-  if (!canvas) return;
-  const parent = canvas.parentElement || document.body;
-  const size = Math.min(parent.clientWidth || 300, 500);
-  canvas.width = size;
-  canvas.height = size;
-  render();
-}
-
-function clearCanvas() {
-  if (!ctx || !canvas) return;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-}
-
-function drawBoatTop(headingRadians) {
-  if (!ctx || !canvas) return;
-  const w = canvas.width;
-  const h = canvas.height;
-  ctx.save();
-  ctx.translate(w / 2, h / 2);
-
-  // Boat always drawn pointing up (no heading rotation for now)
-  ctx.beginPath();
-  ctx.moveTo(0, -40);
-  ctx.lineTo(20, 40);
-  ctx.lineTo(-20, 40);
-  ctx.closePath();
-  ctx.strokeStyle = "black";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawVector(originX, originY, angle, magnitude, scale, color, label) {
-  if (!ctx) return;
-  const len = magnitude * scale;
-  const dx = Math.cos(angle) * len;
-  const dy = Math.sin(angle) * len;
-
-  ctx.save();
-  ctx.translate(originX, originY);
-
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(dx, dy);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  // Arrow head
-  const headLen = 8;
-  const headAngle1 = angle + Math.PI * 0.85;
-  const headAngle2 = angle - Math.PI * 0.85;
-  ctx.beginPath();
-  ctx.moveTo(dx, dy);
-  ctx.lineTo(dx + Math.cos(headAngle1) * headLen, dy + Math.sin(headAngle1) * headLen);
-  ctx.moveTo(dx, dy);
-  ctx.lineTo(dx + Math.cos(headAngle2) * headLen, dy + Math.sin(headAngle2) * headLen);
-  ctx.stroke();
-
-  if (label) {
-    ctx.fillStyle = color;
-    ctx.font = "12px sans-serif";
-    ctx.fillText(label, dx + 5, dy + 5);
-  }
-
-  ctx.restore();
-}
-
-function renderOverview() {
-  if (!ctx || !canvas) return;
-  clearCanvas();
-
-  const w = canvas.width;
-  const h = canvas.height;
-  const originX = w / 2;
-  const originY = h / 2;
-
-  const polars = state.polarsById;
-  const idsOfInterest = [
-    "apparentWind",
-    "calculatedWind",
-    "boatSpeed",
-    "trueWind",
-    "groundSpeed",
-    "groundWind"
-  ];
-
-  let maxMag = 0.1;
-  idsOfInterest.forEach(id => {
-    const p = polars[id];
-    if (p && typeof p.magnitude === "number") {
-      maxMag = Math.max(maxMag, Math.abs(p.magnitude));
-    }
-  });
-
-  const scale = (Math.min(w, h) * 0.35) / maxMag;
-
-  // Draw boat
-  const headingDelta = state.deltasById["heading"];
-  const heading = headingDelta ? headingDelta.value : 0;
-  drawBoatTop(heading);
-
-  const colors = {
-    apparentWind: "#0288d1",
-    calculatedWind: "#26c6da",
-    boatSpeed: "#388e3c",
-    trueWind: "#00bcd4",
-    groundSpeed: "#5d4037",
-    groundWind: "#1976d2"
-  };
-
-  idsOfInterest.forEach(id => {
-    const p = polars[id];
-    if (!p) return;
-    // Boat-plane vs ground-plane: for now, draw all in their own frame using p.angle
-    drawVector(originX, originY, p.angle, p.magnitude, scale, colors[id] || "#000", p.displayAttributes && p.displayAttributes.label);
-  });
-
-  // Update live inputs section with simple numeric values
-  const inputsEl = document.getElementById("panel-inputs");
-  if (inputsEl) {
-    inputsEl.innerHTML = "";
-    const list = document.createElement("ul");
-    idsOfInterest.forEach(id => {
-      const p = polars[id];
-      if (!p) return;
-      const li = document.createElement("li");
-      const label = p.displayAttributes && p.displayAttributes.label ? p.displayAttributes.label : id;
-      const mag = typeof p.magnitude === "number" && p.magnitude !== null ? p.magnitude.toFixed(2) : "—";
-      const ang = typeof p.angle === "number" && p.angle !== null ? p.angle.toFixed(2) : "—";
-      li.textContent = `${label}: speed=${mag} angle(rad)=${ang}`;
-      list.appendChild(li);
-    });
-    inputsEl.appendChild(list);
-  }
-}
-
-function renderCanvasScene(sceneId) {
-  switch (sceneId) {
-    case "overview":
-      return renderOverview();
-    // Other scenes will be implemented later; for now, fall back to overview.
-    case "inputs":
-    case "misalignment":
-    case "mastRotation":
-    case "mastHeel":
-    case "mastMovement":
-    case "upwash":
-    case "leeway":
-    case "trueWind":
-    case "height":
-    case "backCalc":
-    case "groundWind":
-    case "outputs":
-    default:
-      return renderOverview();
-  }
-}
 
 // --- Panel rendering helpers ---
 
@@ -676,6 +642,7 @@ function renderPanel(step) {
   const descEl        = document.getElementById("panel-description");
   const enableEl      = document.getElementById("panel-enable");
   const settingsEl    = document.getElementById("panel-settings");
+  const sourcesEl     = document.getElementById("panel-sources");
   if (!descEl) return;
 
   // 1. Title
@@ -701,28 +668,60 @@ function renderPanel(step) {
     enableEl.appendChild(lbl);
   }
 
-  // 4. Settings
+  // 4. Settings & Sources — split by param type
   settingsEl.innerHTML = "";
+  if (sourcesEl) sourcesEl.innerHTML = "";
+
   const activeParams = (cfg.parameters || []).filter(entry => {
     if (typeof entry === "string") return true;
     return entry.showIf ? entry.showIf(config || {}) : true;
   });
-  if (activeParams.length > 0) {
-    settingsEl.appendChild(sceneSectionHeading("Settings"));
+
+  const settingParams = activeParams.filter(entry => {
+    const key  = typeof entry === "string" ? entry : entry.key;
+    const meta = paramMeta[key];
+    return meta && meta.type !== "string";
+  });
+
+  const sourceParams = activeParams.filter(entry => {
+    const key  = typeof entry === "string" ? entry : entry.key;
+    const meta = paramMeta[key];
+    return !meta || meta.type === "string";
+  });
+
+  function buildParamTable(params) {
     const table = document.createElement("table");
     table.className = "scene-table";
-    activeParams.forEach(entry => {
-      const key   = typeof entry === "string" ? entry : entry.key;
-      const meta  = paramMeta[key] || { label: key, type: "string", unit: "" };
-      const value = getConfigValue(key);
-      const row   = table.insertRow();
+    params.forEach(entry => {
+      const key      = typeof entry === "string" ? entry : entry.key;
+      const meta     = paramMeta[key] || { label: key, type: "string", unit: "" };
+      const value    = getConfigValue(key);
+      const row      = table.insertRow();
       const nameCell = row.insertCell();
       const rowLabel = meta.path || meta.label;
       nameCell.textContent = meta.unit ? `${rowLabel} (${meta.unit})` : rowLabel;
-      const valCell = row.insertCell();
+      const valCell  = row.insertCell();
       valCell.appendChild(createParamControl(key, meta, value));
+      if (meta.default !== undefined && value !== meta.default) {
+        const btn = document.createElement("button");
+        btn.className = "param-reset-btn";
+        btn.title = `Reset to default (${meta.default})`;
+        btn.textContent = "↺";
+        btn.onclick = () => updateConfigAtPath(key, meta.default);
+        valCell.appendChild(btn);
+      }
     });
-    settingsEl.appendChild(table);
+    return table;
+  }
+
+  if (settingParams.length > 0) {
+    settingsEl.appendChild(sceneSectionHeading("Settings"));
+    settingsEl.appendChild(buildParamTable(settingParams));
+  }
+
+  if (sourcesEl && sourceParams.length > 0) {
+    sourcesEl.appendChild(sceneSectionHeading("Sources"));
+    sourcesEl.appendChild(buildParamTable(sourceParams));
   }
 }
 
@@ -735,30 +734,58 @@ function renderPanelLive(step) {
   if (!inputsEl) return;
 
   const cfg = stepConfigs[step.id];
+  // inputs/outputs may be a static array or a function(config) => array
+  const currentCfg = config || {};
+  const cfgInputs  = cfg && (typeof cfg.inputs  === "function" ? cfg.inputs(currentCfg)  : cfg.inputs);
+  const cfgOutputs = cfg && (typeof cfg.outputs === "function" ? cfg.outputs(currentCfg) : cfg.outputs);
 
   // 5. Inputs
   inputsEl.innerHTML = "";
-  if (cfg && cfg.inputs && cfg.inputs.length > 0) {
+  if (cfgInputs && cfgInputs.length > 0) {
     inputsEl.appendChild(sceneSectionHeading("Inputs"));
-    inputsEl.appendChild(createDataTable(cfg.inputs));
+    inputsEl.appendChild(createDataTable(cfgInputs));
   }
 
   // 6. Outputs
   outputsEl.innerHTML = "";
-  if (cfg && cfg.outputs && cfg.outputs.length > 0) {
+  if (cfgOutputs && cfgOutputs.length > 0) {
     outputsEl.appendChild(sceneSectionHeading("Outputs"));
-    outputsEl.appendChild(createDataTable(cfg.outputs));
+    outputsEl.appendChild(createDataTable(cfgOutputs));
   }
 
   // 7. Warnings
   warningsEl.innerHTML = "";
   if (cfg && cfg.correctionFlag) {
+    // Correction steps: show reasons the correction cannot run.
     const reasons = getCannotActivateReasons(cfg);
     if (reasons.length > 0) {
-      warningsEl.appendChild(sceneSectionHeading("Cannot be activated because:"));
+      warningsEl.appendChild(sceneSectionHeading("Missing:"));
       const list = document.createElement("ul");
       list.className = "scene-warnings";
       reasons.forEach(r => {
+        const li = document.createElement("li");
+        li.textContent = r;
+        list.appendChild(li);
+      });
+      warningsEl.appendChild(list);
+    }
+  } else if (cfgInputs && cfgInputs.length > 0) {
+    // Non-correction steps (e.g. overview): list any stale or missing inputs.
+    const missing = [];
+    cfgInputs.forEach(item => {
+      const data = getStateItem(item);
+      if (!data) {
+        missing.push(`"${item.id}" — no data available`);
+      } else if (isStale(data)) {
+        const label = (data.displayAttributes && data.displayAttributes.label) || item.id;
+        missing.push(`"${label}" — data is stale or missing`);
+      }
+    });
+    if (missing.length > 0) {
+      warningsEl.appendChild(sceneSectionHeading("Missing:"));
+      const list = document.createElement("ul");
+      list.className = "scene-warnings";
+      missing.forEach(r => {
         const li = document.createElement("li");
         li.textContent = r;
         list.appendChild(li);
@@ -786,20 +813,20 @@ function buildNav() {
 }
 
 // Fast path: called on every state poll.
-// Only updates the canvas and live data sections (inputs/outputs/warnings).
+// Only updates the SVG graphic and live data sections (inputs/outputs/warnings).
 // Never touches interactive controls (checkboxes, number inputs, dropdowns).
 function render() {
   const step = steps.find(s => s.id === currentStepId) || steps[0];
-  renderCanvasScene(step.scene);
+  renderSVG();
   renderPanelLive(step);
 }
 
-// Full render: rebuilds nav, all panel sections, and canvas.
+// Full render: rebuilds nav, all panel sections, and SVG graphic.
 // Call this when the active step changes or after a config change.
 function renderAll() {
   const step = steps.find(s => s.id === currentStepId) || steps[0];
   buildNav();
-  renderCanvasScene(step.scene);
+  renderSVG();
   renderPanel(step);
   renderPanelLive(step);
 }
@@ -818,10 +845,7 @@ async function tick() {
 }
 
 async function start() {
-  setupCanvas();
   await fetchConfig();
-  // Establish DOM structure in correct order (static sections before live sections)
-  // before the first tick, which would otherwise create #panel-live first.
   renderAll();
   await tick();
   setInterval(tick, 1000);

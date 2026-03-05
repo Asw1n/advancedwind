@@ -354,9 +354,6 @@ module.exports = function (app) {
     readOptions();
     const outputs = [];
     reportFull = new Reporter();
-    let lastTime = null;
-    let previous = null;
-    
     let smootherOptions = { timeConstant: options.timeConstant, processVariance: 1, measurementVariance: 4, timeSpan: 1 };
 
     // heading
@@ -400,6 +397,42 @@ module.exports = function (app) {
     sensorSpeed = new Polar(app, plugin.id, "sensorSpeed");
     sensorSpeed.setDisplayAttributes({ label: "Speed of sensor", plane: "Boat" });
 
+    // Compute sensorSpeed exactly once per attitude sample, using the correct deltaT
+    // between consecutive attitude updates. This avoids the problem of calculate()
+    // firing on every wind delta (often with the same attitude value), which would
+    // recompute a near-zero rotation rate and destroy the valid sensorSpeed.
+    {
+      let attLastTime = null;
+      let attPrevious = null;
+      // Minimum interval between derivative computations (ms).
+      // Attitude messages can arrive in bursts only milliseconds apart; dividing
+      // a small angle change by a near-zero deltaT produces huge spurious velocities.
+      // By requiring at least MIN_ATT_INTERVAL ms we accumulate a reliable window:
+      // attPrevious only advances when we actually compute, so the full angular
+      // change since the last accepted sample is always used.
+      const MIN_ATT_INTERVAL = 50;
+      attitude.onChange = () => {
+        const current = attitude.value;
+        if (!current) return;
+        const now = Date.now();
+        if (!attLastTime) {
+          attLastTime = now;
+          attPrevious = { ...current };
+          return;
+        }
+        const deltaT = (now - attLastTime) / 1000;
+        // Skip samples that arrive too close together — wait for the window to grow.
+        if (deltaT < MIN_ATT_INTERVAL / 1000) return;
+        attLastTime = now;
+        const r = options.heightAboveWater;
+        sensorSpeed.setVectorValue({
+          x: ((current.pitch - attPrevious.pitch) / deltaT) * r,
+          y: ((current.roll  - attPrevious.roll)  / deltaT) * r
+        });
+        attPrevious = { ...current };
+      };
+    }
+
     // Snapshot polars for per-step before/after inspection
     misalignIn  = new Polar(app, plugin.id, "misalignIn");  misalignIn.setDisplayAttributes({  label: "Before misalignment",      plane: "Boat" });
     misalignOut = new Polar(app, plugin.id, "misalignOut"); misalignOut.setDisplayAttributes({ label: "After misalignment",       plane: "Boat" });
@@ -431,7 +464,7 @@ module.exports = function (app) {
       pluginId: plugin.id,
       SmootherClass: KalmanSmoother,
       smootherOptions: smootherOptions,
-      displayAttributes: { label: "Observed apparent Wind", plane: "Boat" },
+      displayAttributes: { label: "Apparent Wind", plane: "Boat" },
       passOn: !options.preventDuplication,
     });
 
@@ -523,6 +556,7 @@ module.exports = function (app) {
     reportFull.addPolar(mastRotIn);   reportFull.addPolar(mastRotOut);
     reportFull.addPolar(mastHeelIn);  reportFull.addPolar(mastHeelOut);
     reportFull.addPolar(mastMoveIn);  reportFull.addPolar(mastMoveOut);
+    reportFull.addPolar(sensorSpeed);
     reportFull.addPolar(upwashIn);    reportFull.addPolar(upwashOut);
     reportFull.addPolar(leewayIn);    reportFull.addPolar(leewayOut);
     reportFull.addPolar(trueWindIn);
@@ -576,12 +610,9 @@ module.exports = function (app) {
       mastHeelOut.copyFrom(calculatedWind);
 
       // --- Mast movement ---
+      // sensorSpeed is kept current by attitude.onChange; just apply it here if enabled.
       mastMoveIn.copyFrom(calculatedWind);
       if (options.correctForMastMovement && attitude && attitude.stale === false) {
-        const rotation = calculateRotation(attitude.value);
-        const r = options.heightAboveWater;
-        const s = { x: rotation.pitch * r, y: rotation.roll * r };
-        sensorSpeed.setVectorValue(s);
         calculatedWind.substract(sensorSpeed);
       }
       mastMoveOut.copyFrom(calculatedWind);
@@ -645,27 +676,6 @@ module.exports = function (app) {
 
       function approximateWindGradient() {
         return Math.pow((10 / options.heightAboveWater), options.windExponent);
-      }
-
-      function calculateRotation(current) {
-        let speed = { roll: 0, pitch: 0, yaw: 0 };
-        if (!lastTime) {
-          lastTime = Date.now();
-          previous = { ...current };
-          return speed;
-        }
-        let now = Date.now();
-        let deltaT = (now - lastTime) / 1000;
-        lastTime = now;
-        if (deltaT > 0) {
-          speed = {
-            roll: (current.roll - previous.roll) / deltaT,
-            pitch: (current.pitch - previous.pitch) / deltaT,
-            yaw: (current.yaw - previous.yaw) / deltaT
-          };
-        }
-        previous = { ...current };
-        return speed;
       }
 
     }

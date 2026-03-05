@@ -29,13 +29,17 @@
         <section class="insight-scene">
           <div class="insight-scene-columns">
             <div class="insight-scene-canvas">
-              <canvas id="insight-canvas"></canvas>
+              <svg id="insight-canvas" xmlns="http://www.w3.org/2000/svg"
+                   viewBox="-100 -100 200 200"
+                   style="width:100%;aspect-ratio:1/1;display:block;">
+              </svg>
             </div>
             <div class="insight-scene-panel">
               <div id="insight-panel">
                 <p id="panel-description" class="scene-description"></p>
                 <div id="panel-enable"></div>
                 <div id="panel-settings"></div>
+                <div id="panel-sources"></div>
                 <div id="panel-inputs"></div>
                 <div id="panel-outputs"></div>
                 <div id="panel-warnings"></div>

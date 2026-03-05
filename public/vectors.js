@@ -124,13 +124,10 @@ async function fetchVectorData() {
     else {
       time = new Date();
       deltaT = (time - lastTime)/1000;
-      if (largest != previous)  {
-        if (largest > previous) {
-          previous *= (1.005 );
-        }
-        else {
-          previous *= (0.9995 );
-        }
+      if (largest > previous) {
+        previous = largest;        // snap out immediately so nothing clips
+      } else {
+        previous *= 0.9995;        // ease in slowly when vectors shrink
       }
     }
 

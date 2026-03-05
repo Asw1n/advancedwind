@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Boat Views – Dev</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #E4E5E6;
+      color: #212121;
+      padding: 16px;
+    }
+    h1 { font-size: 18px; margin: 0 0 14px 0; color: #003399; }
+
+    .controls {
+      background: #fff;
+      border-radius: 6px;
+      padding: 14px 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+      margin-bottom: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 28px;
+      align-items: center;
+    }
+    .cg { display: flex; align-items: center; gap: 8px; }
+    .cg label { font-size: 12px; color: #555; min-width: 110px; }
+    .cg input[type="range"] { width: 130px; cursor: pointer; }
+    .cg .val { font-size: 12px; font-family: monospace; color: #1976d2; min-width: 42px; }
+    .toggle-btn {
+      padding: 5px 14px;
+      border: 1px solid #1976d2;
+      background: #fff; color: #1976d2;
+      border-radius: 4px; cursor: pointer; font-size: 12px;
+    }
+    .toggle-btn.active { background: #1976d2; color: #fff; }
+
+    .views { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+    .view-block {
+      background: #fff;
+      border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+      padding: 10px 12px 6px;
+    }
+    .view-block h3 {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: #666; margin: 0 0 8px 0;
+    }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+
+<h1>Boat Views – Development</h1>
+
+<div class="controls">
+  <div class="cg">
+    <label>Heel (°)</label>
+    <input type="range" id="sl-heel" min="-45" max="45" value="0" step="0.5">
+    <span class="val" id="lbl-heel">0°</span>
+  </div>
+  <div class="cg">
+    <label>Pitch (°)</label>
+    <input type="range" id="sl-pitch" min="-15" max="15" value="0" step="0.5">
+    <span class="val" id="lbl-pitch">0°</span>
+  </div>
+  <div class="cg">
+    <label>Heading (°)</label>
+    <input type="range" id="sl-heading" min="0" max="359" value="0" step="1">
+    <span class="val" id="lbl-heading">0°</span>
+  </div>
+  <div class="cg">
+    <label>Mast rotation (°)</label>
+    <input type="range" id="sl-mast" min="-90" max="90" value="0" step="1">
+    <span class="val" id="lbl-mast">0°</span>
+  </div>
+  <div class="cg">
+    <label>Top-view frame:</label>
+    <button class="toggle-btn" id="btn-frame">Switch to North up</button>
+  </div>
+</div>
+
+<div class="views">
+
+  <div class="view-block">
+    <h3>Top View</h3>
+    <canvas id="cvTop" width="300" height="300"></canvas>
+  </div>
+
+  <div class="view-block">
+    <h3>Stern View</h3>
+    <canvas id="cvStern" width="300" height="320"></canvas>
+  </div>
+
+  <div class="view-block">
+    <h3>Side View (Starboard)</h3>
+    <canvas id="cvSide" width="480" height="300"></canvas>
+  </div>
+
+</div>
+
+<script>
+// ============================================================
+//  Boat geometry constants  (all distances in "boat units";
+//  LOA = 100 units = a nominal 10-metre yacht)
+// ============================================================
+const B = {
+  halfLen:      50,    // half length overall
+  halfBeam:     14,    // max half-beam  (beam ≈ 28% of LOA)
+  freeboard:     8,    // deck above waterline at midship
+  hullDraft:    12,    // deepest point of hull below waterline
+  keelDepth:    18,    // fin-keel height below hull bottom
+  keelHalfBase:  3.5, // keel half-width at hull attachment
+  keelHalfTip:   1.2, // keel half-width at bulb
+  mastFwd:      15,    // mast station forward of midship
+  mastHeight:   68,    // VISIBLE mast height above deck
+                       // (true height is ~160 u; cropped to fit canvas)
+  spreaderH:    30,    // spreader height above deck
+  spreaderW:    11,    // spreader half-span
+};
+
+// ============================================================
+//  State
+// ============================================================
+let heel    = 0;      // degrees, starboard positive
+let pitch   = 0;      // degrees, bow-up positive
+let heading = 0;      // degrees from north
+let mastRot = 0;      // degrees
+let northUp = false;
+
+const D = Math.PI / 180;
+
+// ============================================================
+//  Controls wiring
+// ============================================================
+function wireSlider(slId, lblId, unit, cb) {
+  const sl = document.getElementById(slId);
+  const lb = document.getElementById(lblId);
+  sl.addEventListener('input', () => {
+    lb.textContent = sl.value + unit;
+    cb(parseFloat(sl.value));
+  });
+}
+wireSlider('sl-heel',    'lbl-heel',    '°', v => { heel    = v; drawAll(); });
+wireSlider('sl-pitch',   'lbl-pitch',   '°', v => { pitch   = v; drawAll(); });
+wireSlider('sl-heading', 'lbl-heading', '°', v => { heading = v; drawAll(); });
+wireSlider('sl-mast',    'lbl-mast',    '°', v => { mastRot = v; drawAll(); });
+
+const btnFrame = document.getElementById('btn-frame');
+btnFrame.addEventListener('click', () => {
+  northUp = !northUp;
+  btnFrame.textContent = northUp ? 'Switch to Bow up' : 'Switch to North up';
+  btnFrame.classList.toggle('active', northUp);
+  drawAll();
+});
+
+// ============================================================
+//  Shared colour palette
+// ============================================================
+const C = {
+  hullFill:   '#f5eff7',
+  hullStroke: '#5d3a8e',   // purple – matches main.css #hull
+  mast:       '#6d4c41',   // brown  – matches main.css mast
+  keelFill:   '#555',
+  keelStroke: '#333',
+  water:      'rgba(179,229,252,0.40)',
+  waterLine:  '#4fc3f7',
+  rig:        '#bbb',      // stays and shrouds
+  angle:      '#e53935',   // angle annotations
+  refLine:    'rgba(0,0,0,0.10)',
+};
+
+// ============================================================
+//  Helpers
+// ============================================================
+function setHullStyle(ctx) {
+  ctx.fillStyle   = C.hullFill;
+  ctx.strokeStyle = C.hullStroke;
+  ctx.lineWidth   = 2;
+}
+
+/** Draw a "break" mark (~) indicating the mast continues off-screen. */
+function drawBreakMark(ctx, x, y) {
+  const g = 5;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x - g, y);
+  ctx.lineTo(x + g, y + g);
+  ctx.moveTo(x - g, y + g);
+  ctx.lineTo(x + g, y + g * 2);
+  ctx.strokeStyle = C.mast;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Compass rose / north arrow.  angle = clockwise rotation from canvas-up. */
+function drawNorthArrow(ctx, x, y, angle) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  const L = 13;
+  // Red north half
+  ctx.beginPath();
+  ctx.moveTo(0, -L); ctx.lineTo(4, 0); ctx.lineTo(0, -5); ctx.lineTo(-4, 0);
+  ctx.closePath();
+  ctx.fillStyle = '#c62828'; ctx.fill();
+  // Grey south half
+  ctx.beginPath();
+  ctx.moveTo(0, L); ctx.lineTo(4, 0); ctx.lineTo(0, 5); ctx.lineTo(-4, 0);
+  ctx.closePath();
+  ctx.fillStyle = '#999'; ctx.fill();
+  // 'N' label
+  ctx.fillStyle = '#c62828';
+  ctx.font = 'bold 9px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('N', 0, -L - 4);
+  ctx.restore();
+}
+
+/** Thin dashed reference line. */
+function dashed(ctx, x1, y1, x2, y2, color = C.refLine) {
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+  ctx.strokeStyle = color; ctx.lineWidth = 0.8;
+  ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
+  ctx.restore();
+}
+
+/** Annotate an angle arc (drawn in current transform space). */
+function drawAngleArc(ctx, cx, cy, r, startA, endA, label) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.beginPath();
+  ctx.arc(0, 0, r, Math.min(startA, endA), Math.max(startA, endA));
+  ctx.strokeStyle = C.angle; ctx.lineWidth = 1.5; ctx.stroke();
+  // Tiny tick at reference (startA)
+  ctx.beginPath();
+  ctx.moveTo(Math.cos(startA) * (r - 4), Math.sin(startA) * (r - 4));
+  ctx.lineTo(Math.cos(startA) * (r + 4), Math.sin(startA) * (r + 4));
+  ctx.strokeStyle = C.angle; ctx.lineWidth = 1; ctx.stroke();
+  // Label
+  if (label) {
+    const midA = (startA + endA) / 2;
+    ctx.fillStyle = C.angle;
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, Math.cos(midA) * (r + 14), Math.sin(midA) * (r + 14));
+  }
+  ctx.restore();
+}
+
+// ============================================================
+//  TOP VIEW  (looking down)
+//  Canvas 300 × 300, bow pointing up (−y direction in canvas)
+// ============================================================
+function drawTopView(ctx) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  const cx = W / 2, cy = H / 2;
+  const s  = 2.15;   // pixels per boat unit
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#f0f4f8';
+  ctx.fillRect(0, 0, W, H);
+
+  // Light background circle (visual boundary for vectors later)
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, W * 0.44, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.restore();
+
+  // --- Boat group ---
+  // In North-up mode  : boat rotates clockwise with heading; north stays up.
+  // In Bow-up mode    : boat always points up; north arrow rotates.
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (northUp) ctx.rotate(heading * D);
+
+  const hl = B.halfLen  * s;
+  const hb = B.halfBeam * s;
+  // Heel → compresses beam (foreshortening when viewed from directly above)
+  // Pitch → compresses length
+  ctx.save();
+  ctx.scale(Math.cos(heel * D), Math.cos(pitch * D));
+
+  // Deck centreline (dashed guide)
+  dashed(ctx, 0, -hl * 0.93, 0, hl * 0.76, '#d0b8df');
+
+  // Hull outline (bow at canvas −y)
+  ctx.beginPath();
+  ctx.moveTo(0, -hl);                                // bow tip
+  ctx.bezierCurveTo( hb * 0.30, -hl * 0.58,
+                     hb,        -hl * 0.04,
+                     hb * 0.65,  hl * 0.52);        // starboard side
+  ctx.quadraticCurveTo( hb * 0.35, hl * 0.80,  0, hl * 0.78);  // stern stbd→centre
+  ctx.quadraticCurveTo(-hb * 0.35, hl * 0.80, -hb * 0.65, hl * 0.52);
+  ctx.bezierCurveTo(-hb,        -hl * 0.04,
+                    -hb * 0.30, -hl * 0.58,
+                     0,         -hl);               // port side back to bow
+  ctx.closePath();
+  setHullStyle(ctx);
+  ctx.fill(); ctx.stroke();
+
+  // Mast mark (dot at mast station)
+  const mastY = -(B.mastFwd * s) * Math.cos(pitch * D);
+  ctx.beginPath(); ctx.arc(0, mastY, 3.5, 0, Math.PI * 2);
+  ctx.fillStyle = C.mast; ctx.fill();
+
+  // Mast-rotation indicator (line toward rotated mast plane)
+  if (Math.abs(mastRot) > 0.5) {
+    const mr  = mastRot * D;
+    const arm = hb * 1.6;
+    const ex  = Math.sin(mr) * arm;
+    const ey  = mastY - Math.cos(mr) * arm;
+    ctx.beginPath(); ctx.moveTo(0, mastY); ctx.lineTo(ex, ey);
+    ctx.strokeStyle = C.mast; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(ex, ey, 3, 0, Math.PI * 2);
+    ctx.fillStyle = C.mast; ctx.fill();
+    // Small arc to show rotation angle
+    const r = 18;
+    ctx.save(); ctx.translate(0, mastY);
+    ctx.beginPath();
+    ctx.arc(0, 0, r, -Math.PI / 2, -Math.PI / 2 + mr, mr < 0);
+    ctx.strokeStyle = C.angle; ctx.lineWidth = 1; ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.restore(); // end scale (foreshortening)
+  ctx.restore(); // end boat group
+
+  // North arrow
+  // In bow-up  : arrow indicates where north actually is → rotates with −heading
+  // In north-up: arrow always points up                 → angle = 0
+  drawNorthArrow(ctx, 22, 22, northUp ? 0 : -heading * D);
+
+  // Frame label
+  ctx.fillStyle = '#444'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'left';
+  ctx.fillText(northUp ? 'North up' : 'Bow up', 7, H - 7);
+}
+
+// ============================================================
+//  STERN VIEW  (looking forward, from astern)
+//  Canvas 300 × 320; waterline at ~210 px from top.
+//  Heel rotates the entire boat group.
+// ============================================================
+function drawSternView(ctx) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  const cx = W / 2;
+  const s  = 2.5;   // pixels per boat unit
+
+  // Position waterline so mast tip has ~15 px margin at top
+  const wl_y = 15 + (B.mastHeight + B.freeboard) * s;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#f0f4f8'; ctx.fillRect(0, 0, W, H);
+
+  // Water
+  ctx.fillStyle = C.water;
+  ctx.fillRect(0, wl_y, W, H - wl_y);
+  ctx.beginPath(); ctx.moveTo(0, wl_y); ctx.lineTo(W, wl_y);
+  ctx.strokeStyle = C.waterLine; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Vertical reference line (stays fixed when boat heels)
+  dashed(ctx, cx, 5, cx, H - 5);
+
+  // --- Boat group (heel rotation) ---
+  ctx.save();
+  ctx.translate(cx, wl_y);
+  ctx.rotate(heel * D);  // positive heel = starboard down = clockwise in canvas
+
+  const hb = B.halfBeam  * s;
+  const fr = B.freeboard * s;
+  const hd = B.hullDraft * s;
+  const kd = B.keelDepth * s;
+  const mh = B.mastHeight * s;
+  const kb = B.keelHalfBase * s;
+  const kt = B.keelHalfTip  * s;
+  // Stern transom is ~88% of max beam on a modern yacht
+  const thb = hb * 0.88;
+
+  // Keel
+  ctx.beginPath();
+  ctx.moveTo(-kb, hd); ctx.lineTo(kb, hd);
+  ctx.lineTo(kt, hd + kd); ctx.lineTo(-kt, hd + kd);
+  ctx.closePath();
+  ctx.fillStyle = C.keelFill; ctx.strokeStyle = C.keelStroke; ctx.lineWidth = 1;
+  ctx.fill(); ctx.stroke();
+
+  // Hull cross section (stern transom view)
+  ctx.beginPath();
+  ctx.moveTo(-thb, -fr);                               // port deck edge
+  ctx.lineTo(-thb,  0);                                // port topsides to waterline
+  ctx.bezierCurveTo(-thb, hd * 0.55, -kb * 1.7, hd, -kb, hd);  // port bilge
+  ctx.lineTo(kb, hd);                                  // keel top flat
+  ctx.bezierCurveTo(kb * 1.7, hd, thb, hd * 0.55, thb, 0);     // starboard bilge
+  ctx.lineTo(thb, -fr);                                // starboard deck edge
+  ctx.bezierCurveTo(thb * 0.5, -fr - 3, -thb * 0.5, -fr - 3, -thb, -fr); // deck camber
+  ctx.closePath();
+  setHullStyle(ctx); ctx.fill(); ctx.stroke();
+
+  // Mast and rig
+  ctx.save();
+  ctx.translate(0, -fr);          // move origin to deck at centreline
+
+  // Shrouds (from chain plates on deck to spreader tips)
+  const spH = B.spreaderH * s;
+  const spW = B.spreaderW * s;
+  ctx.beginPath();
+  ctx.moveTo(-thb * 0.72, 0); ctx.lineTo(-spW, -spH);
+  ctx.moveTo( thb * 0.72, 0); ctx.lineTo( spW, -spH);
+  ctx.strokeStyle = C.rig; ctx.lineWidth = 0.9; ctx.stroke();
+  // Upper shrouds (spreader tip to masthead)
+  ctx.beginPath();
+  ctx.moveTo(-spW, -spH); ctx.lineTo(0, -mh);
+  ctx.moveTo( spW, -spH); ctx.lineTo(0, -mh);
+  ctx.strokeStyle = C.rig; ctx.lineWidth = 0.7; ctx.stroke();
+
+  // Spreader bar
+  ctx.beginPath();
+  ctx.moveTo(-spW, -spH); ctx.lineTo(spW, -spH);
+  ctx.strokeStyle = C.mast; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Mast spar
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -mh);
+  ctx.strokeStyle = C.mast; ctx.lineWidth = 2.5; ctx.stroke();
+
+  // Masthead marker
+  ctx.beginPath(); ctx.arc(0, -mh, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = C.mast; ctx.fill();
+
+  // Break mark (mast continues off-screen above)
+  drawBreakMark(ctx, 0, -mh + 4);
+
+  ctx.restore(); // end mast group
+
+  // Heel angle annotation
+  if (Math.abs(heel) > 0.4) {
+    const r = 26;
+    const startA = -Math.PI / 2;          // reference: straight up
+    const endA   = startA + heel * D;
+    drawAngleArc(ctx, 0, 0, r, startA, endA, `${Math.abs(heel).toFixed(1)}°`);
+  }
+
+  ctx.restore(); // end boat group
+
+  // P / S labels
+  ctx.fillStyle = '#666'; ctx.font = '11px Arial';
+  ctx.textAlign = 'left';  ctx.fillText('P', 7, wl_y - 5);
+  ctx.textAlign = 'right'; ctx.fillText('S', W - 7, wl_y - 5);
+  ctx.fillStyle = C.waterLine; ctx.textAlign = 'center';
+  ctx.fillText('waterline', W / 2, wl_y + 13);
+  ctx.fillStyle = '#333'; ctx.font = 'bold 10px Arial';
+  ctx.fillText('← looking forward →', W / 2, H - 5);
+}
+
+// ============================================================
+//  SIDE VIEW  (starboard, looking to port)
+//  Canvas 480 × 300; waterline at ~167 px from top.
+//  Pitch rotates the entire boat group.
+// ============================================================
+function drawSideView(ctx) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  // Offset boat centre slightly aft so bow has more room for vectors on the right
+  const cx = W / 2 - 15;
+  const s  = 2.0;   // pixels per boat unit
+
+  const mastPx = (B.mastHeight + B.freeboard) * s;
+  const wl_y   = 15 + mastPx;   // waterline y
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#f0f4f8'; ctx.fillRect(0, 0, W, H);
+
+  // Water
+  ctx.fillStyle = C.water;
+  ctx.fillRect(0, wl_y, W, H - wl_y);
+  ctx.beginPath(); ctx.moveTo(0, wl_y); ctx.lineTo(W, wl_y);
+  ctx.strokeStyle = C.waterLine; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Horizontal reference (stays fixed when boat pitches)
+  dashed(ctx, 5, wl_y, W - 5, wl_y, 'rgba(0,0,0,0.08)');
+
+  // --- Boat group (pitch rotation around midship/waterline centre) ---
+  ctx.save();
+  ctx.translate(cx, wl_y);
+  ctx.rotate(-pitch * D);   // bow-up = counterclockwise
+
+  const hl = B.halfLen  * s;
+  const fr = B.freeboard * s;
+  const hd = B.hullDraft * s;
+  const kd = B.keelDepth * s;
+  const mh = B.mastHeight * s;
+  const kb = B.keelHalfBase * s;
+  const kt = B.keelHalfTip  * s;
+  const mf = B.mastFwd * s;         // mast forward of midship
+  const kx = mf * 0.10;             // keel slightly aft of midship
+
+  // Heel foreshortens the hull depth visible in side view
+  const heelFactor = Math.abs(Math.cos(heel * D));
+
+  // Keel fin
+  ctx.beginPath();
+  ctx.moveTo(kx - kb, hd * heelFactor);
+  ctx.lineTo(kx + kb, hd * heelFactor);
+  ctx.lineTo(kx + kt, (hd + kd) * heelFactor);
+  ctx.lineTo(kx - kt, (hd + kd) * heelFactor);
+  ctx.closePath();
+  ctx.fillStyle = C.keelFill; ctx.strokeStyle = C.keelStroke; ctx.lineWidth = 1;
+  ctx.fill(); ctx.stroke();
+
+  // Hull profile (bow at +x / right, stern at −x / left)
+  ctx.beginPath();
+  ctx.moveTo(hl, 0);                                // bow stem at waterline
+
+  // Deck sheer: bow to stern
+  ctx.bezierCurveTo(hl * 0.88, -fr * 1.40,         // high bow freeboard
+                    mf,         -fr * 1.45,          // highest at mast
+                   -hl * 0.45,  -fr * 1.15);         // dropping mid-ship
+  ctx.bezierCurveTo(-hl * 0.80, -fr * 0.90,
+                    -hl * 0.96, -fr * 0.60,
+                    -hl,        -fr * 0.38);         // stern/transom top
+
+  // Transom (near-vertical stern)
+  ctx.lineTo(-hl, hd * 0.22 * heelFactor);
+
+  // Bottom from stern to bow (with rocker)
+  ctx.bezierCurveTo(-hl * 0.70,  hd * 0.85 * heelFactor,
+                    -kx,          hd         * heelFactor,
+                     kx,          hd         * heelFactor);
+  ctx.bezierCurveTo( hl * 0.45,  hd * 0.70 * heelFactor,
+                     hl * 0.88,  hd * 0.20 * heelFactor,
+                     hl,          0);                // back to bow
+
+  ctx.closePath();
+  setHullStyle(ctx); ctx.fill(); ctx.stroke();
+
+  // --- Mast and rig ---
+  // Deck height at mast position (follows sheer)
+  const deckAtMast = -fr * 1.42;   // approximation of sheer height above WL at mast
+  const rakeAngle  = 2 * D;        // typical aft rake
+
+  ctx.save();
+  ctx.translate(mf, deckAtMast);
+  ctx.rotate(rakeAngle);            // aft rake
+
+  // Forestay
+  ctx.beginPath();
+  ctx.moveTo(0, -mh);
+  ctx.lineTo(hl - mf, -deckAtMast);   // to bow area (approx.)
+  ctx.strokeStyle = C.rig; ctx.lineWidth = 0.9; ctx.stroke();
+
+  // Backstay
+  ctx.beginPath();
+  ctx.moveTo(0, -mh);
+  ctx.lineTo(-(hl + mf) * 0.92, -deckAtMast * 0.45);
+  ctx.strokeStyle = C.rig; ctx.lineWidth = 0.9; ctx.stroke();
+
+  // Lower shroud / chain-plate line (schematic — stays just off-screen in side view)
+  // shown as short line from mast foot outward
+  const spH = B.spreaderH * s;
+  const spW = B.spreaderW * s;
+  // Diagonal shroud from spreader tip to chain plate
+  ctx.beginPath();
+  ctx.moveTo( spW, -spH);
+  ctx.lineTo( B.halfBeam * s * 0.4, 0);
+  ctx.strokeStyle = C.rig; ctx.lineWidth = 0.7; ctx.stroke();
+
+  // Spreader bar (shows as a short horizontal stub in side view)
+  ctx.beginPath();
+  ctx.moveTo(-3, -spH); ctx.lineTo(spW + 4, -spH);
+  ctx.strokeStyle = C.mast; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Mast spar
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -mh);
+  ctx.strokeStyle = C.mast; ctx.lineWidth = 2.5; ctx.stroke();
+
+  // Masthead marker
+  ctx.beginPath(); ctx.arc(0, -mh, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = C.mast; ctx.fill();
+
+  // Break mark (mast continues above)
+  drawBreakMark(ctx, 0, -mh + 4);
+
+  ctx.restore(); // end mast
+
+  // Pitch angle annotation
+  if (Math.abs(pitch) > 0.4) {
+    // Reference horizontal line at midship
+    const r = 28;
+    const startA = 0;                   // horizon reference
+    const endA   = -pitch * D;          // bow-up = negative canvas angle
+    drawAngleArc(ctx, 0, 0, r, startA, endA, `${Math.abs(pitch).toFixed(1)}°`);
+    // Horizontal tick
+    ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0);
+    ctx.strokeStyle = 'rgba(200,0,0,0.25)'; ctx.lineWidth = 0.8; ctx.stroke();
+  }
+
+  ctx.restore(); // end boat group
+
+  // Bow / Stern labels
+  const bowX   = cx + B.halfLen * s;
+  const sternX = cx - B.halfLen * s;
+  ctx.fillStyle = '#666'; ctx.font = '11px Arial';
+  ctx.textAlign = 'right'; ctx.fillText('Stern', sternX - 4, wl_y - 5);
+  ctx.textAlign = 'left';  ctx.fillText('Bow',   bowX   + 4, wl_y - 5);
+  ctx.fillStyle = C.waterLine; ctx.textAlign = 'center';
+  ctx.fillText('waterline', cx, wl_y + 13);
+  ctx.fillStyle = '#333'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center';
+  ctx.fillText('← Starboard side view →', cx, H - 5);
+}
+
+// ============================================================
+//  Render all three canvases
+// ============================================================
+function drawAll() {
+  drawTopView  (document.getElementById('cvTop').getContext('2d'));
+  drawSternView(document.getElementById('cvStern').getContext('2d'));
+  drawSideView (document.getElementById('cvSide').getContext('2d'));
+}
+
+drawAll();
+</script>
+</body>
+</html>

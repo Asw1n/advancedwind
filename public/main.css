@@ -1,95 +1,38 @@
 /* --- CSS Variables for Colors --- */
 :root {
-  /* Data type colors */
-  --polar-color: #0d47a1;           /* darker blue */
-  --delta-color: #1b5e20;           /* darker green */
-  --attitude-color: #b28704;        /* darker yellow/gold */
-  --table2d-color: #4e342e;         /* darker brown */
+  /* Signal K UI base colors (extracted from the Signal K admin interface) */
+  --signalk-blue: #003399;          /* brand / logo blue */
+  --signalk-sidebar-bg: #1C2B33;    /* sidebar background (dark blue-grey) */
+  --signalk-sidebar-active: #253D4A;/* sidebar active/hover item */
+  --signalk-sidebar-text: #ffffff;  /* sidebar foreground text & icons */
+  --signalk-amber: #FFB300;         /* activity bar / accent amber */
+  --signalk-green: #43A047;         /* notification badge green */
+  --signalk-page-bg: #F4F6F8;       /* page body background */
+  --signalk-text-primary: #212121;  /* primary content text */
+  --signalk-text-secondary: #546E7A;/* secondary / label text */
 
-  /* Instance colors */
-  --heading-color: #000000;         /* black */
-  --attitude-color-instance: #000000; /* black */
-  --current-color: #0d47a1;         /* darker blue */
-  --currentDamped-color: #0d47a1;   /* darker blue */
-  --boatSpeed-color: #388e3c;       /* darker green */
-  --boatSpeedDamped-color: #388e3c; /* darker green */
-  --correctedBoatSpeed-color: #27632a; /* even darker green */
-  --boatSpeedRefGround-color: #00575b; /* darker teal */
-  --groundSpeed-color: #5d4037;     /* darker brown */
-  --groundSpeedDamped-color: #5d4037; /* darker brown */
-  --speedCorrection-color: #ad1457; /* darker pink/red */
-  --residual-color: #6a1b9a;        /* darker purple */
-  --correctionTable-color: #4e342e; /* darker brown */
+  /* Vector colours — matched to SVG element IDs drawn by the graph */
+  --groundSpeed-color: #43A047;               /* ground speed vector */  --boatSpeed-color: #FFCC00;                 /* boat speed vector */  --apparentWind-color: #0288d1;              /* apparent wind */
+  --trueWind-color: #00bcd4;                  /* true wind */
+  --groundWind-color: #1976d262;                /* ground wind */
 
-  /* Wind vector instance colors */
-  --apparentWind-color: #0288d1;         /* medium blue-cyan */
-  --trueWind-color: #00bcd4;             /* lighter cyan */
-  --groundWind-color: #1976d2;           /* strong blue */
-  --correctedApparentWind-color: #26c6da;/* soft cyan-blue */
 }
 
-/* --- Data Type Classes --- */
-
-.data {
-  color: black;
-}
-
-/* --- Instance IDs for Specific Colors --- */
-#heading {
-  color: var(--heading-color);
-  stroke: var(--heading-color);
-}
-#attitude {
-  color: var(--attitude-color-instance);
-  stroke: var(--attitude-color-instance);
-}
-#current, #currentDamped {
-  color: var(--current-color);
-  stroke: var(--current-color);
-}
-#boatSpeed, #boatSpeedDamped {
-  color: var(--boatSpeed-color);
-  stroke: var(--boatSpeed-color);
-}
-#correctedBoatSpeed {
-  color: var(--correctedBoatSpeed-color);
-  stroke: var(--correctedBoatSpeed-color);
-}
-#boatSpeedRefGround {
-  color: var(--boatSpeedRefGround-color);
-  stroke: var(--boatSpeedRefGround-color);
-}
-#groundSpeed, #groundSpeedDamped {
-  color: var(--groundSpeed-color);
+/* --- SVG vector colours by element ID --- */
+#groundSpeed {
   stroke: var(--groundSpeed-color);
 }
-#speedCorrection {
-  color: var(--speedCorrection-color);
-  stroke: var(--speedCorrection-color);
-}
-#residual {
-  color: var(--residual-color);
-  stroke: var(--residual-color);
-}
-#correctionTable {
-  color: var(--correctionTable-color);
-  stroke: var(--correctionTable-color);
+#boatSpeed {
+  stroke: var(--boatSpeed-color);
 }
 #apparentWind {
-  color: var(--apparentWind-color);
   stroke: var(--apparentWind-color);
 }
 #trueWind {
-  color: var(--trueWind-color);
   stroke: var(--trueWind-color);
 }
 #groundWind {
-  color: var(--groundWind-color);
   stroke: var(--groundWind-color);
-}
-#calculatedWind {
-  color: var(--correctedApparentWind-color);
-  stroke: var(--correctedApparentWind-color);
 }
 
 /* --- Table and Cell Styling --- */
@@ -100,23 +43,7 @@ th, td {
   border: 1px solid black;
   padding: 5px;
 }
-.TableCell {
-  width: 60px;
-  height: 60px;
-  text-align: center;
-  vertical-align: middle;
-  font-size: 11px;
-}
-.selectedCell {
-  color: #fff;
-  background-color: #1976d2;
-}
-.emptyCell {
-}
-
-.stale {
-  background-color: orangered;
-}
+/* .stale rows are flagged in JS but shown only via the warnings text panel, not via background colour */
 
 /* --- SVG Styling --- */
 svg {
@@ -132,7 +59,7 @@ line {
   stroke-width: 2;
 }
 #hull, #mast {
-  stroke: purple;
+  stroke: #003399;
   stroke-width: 1;
   stroke-linecap: round;
 }
@@ -329,6 +256,21 @@ body {
 
 .scene-number-input {
   width: 80px;
+}
+
+.param-reset-btn {
+  margin-left: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--signalk-text-secondary);
+  padding: 0 2px;
+  vertical-align: middle;
+  line-height: 1;
+}
+.param-reset-btn:hover {
+  color: var(--signalk-blue);
 }
 
 .scene-text-input {

@@ -1,0 +1,2 @@
+- check norm to 10 meters
+- remove legacy files and code
