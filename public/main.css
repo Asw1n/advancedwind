@@ -20,19 +20,29 @@
 
 /* --- SVG vector colours by element ID --- */
 #groundSpeed {
-  stroke: var(--groundSpeed-color);
+  stroke: var(--signalk-sidebar-bg);
+  stroke-width: 1;
 }
 #boatSpeed {
-  stroke: var(--boatSpeed-color);
+  stroke: var(--signalk-sidebar-active);
+  stroke-width: 1;
 }
 #apparentWind {
-  stroke: var(--apparentWind-color);
+  stroke: var(--signalk-amber);
 }
 #trueWind {
-  stroke: var(--trueWind-color);
+  stroke: var(--signalk-blue);
 }
 #groundWind {
   stroke: var(--groundWind-color);
+}
+#correctedWind {
+  stroke: var(--signalk-green);
+}
+#heelVector,
+#mastMoveVector {
+  stroke: var(--signalk-sidebar-bg);
+  stroke-width: 1;
 }
 
 /* --- Table and Cell Styling --- */

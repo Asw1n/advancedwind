@@ -273,6 +273,7 @@ module.exports = function (app) {
   let heightIn    = null; let heightOut    = null; // heightIn = trueWind before scale
   let backCalcOut = null;                          // back-calculated apparent wind snapshot
   let groundWindIn = null;                         // groundWind step: no calculatedWind output
+  let upwashAngle  = null;                         // computed upwash angle (rad) — scalar delta
 
 
   plugin.registerWithRouter = function (router) {
@@ -390,8 +391,8 @@ module.exports = function (app) {
       subscribe: true,
       app,
       pluginId: plugin.id,
-      SmootherClass: KalmanSmoother,
-      smootherOptions: smootherOptions,
+      SmootherClass: MovingAverageSmoother,
+      smootherOptions: {timeSpan: 1},
       displayAttributes: { label: "Attitude" }
     });
     sensorSpeed = new Polar(app, plugin.id, "sensorSpeed");
@@ -451,6 +452,18 @@ module.exports = function (app) {
     heightOut   = new Polar(app, plugin.id, "heightOut");   heightOut.setDisplayAttributes({   label: "True wind (after height norm.)",  plane: "Boat" });
     backCalcOut = new Polar(app, plugin.id, "backCalcOut"); backCalcOut.setDisplayAttributes({ label: "Corrected apparent wind",  plane: "Boat" });
     groundWindIn = new Polar(app, plugin.id, "groundWindIn"); groundWindIn.setDisplayAttributes({ label: "Corrected apparent wind", plane: "Boat" });
+    // Scalar delta for the computed upwash correction angle (radians).
+    // Always computed each cycle (even when correction is disabled) so the
+    // UI can display the would-be correction regardless of the toggle state.
+    upwashAngle = {
+      id: "upwashAngle",
+      value: null,
+      stale: true,
+      displayAttributes: { label: "Calculated upwash", unit: "rad" },
+      report() {
+        return { id: this.id, value: this.value, stale: this.stale, displayAttributes: this.displayAttributes };
+      }
+    };
 
     //apparent wind
     apparentWind = createSmoothedPolar({
@@ -557,7 +570,7 @@ module.exports = function (app) {
     reportFull.addPolar(mastHeelIn);  reportFull.addPolar(mastHeelOut);
     reportFull.addPolar(mastMoveIn);  reportFull.addPolar(mastMoveOut);
     reportFull.addPolar(sensorSpeed);
-    reportFull.addPolar(upwashIn);    reportFull.addPolar(upwashOut);
+    reportFull.addPolar(upwashIn);    reportFull.addPolar(upwashOut);  reportFull.addDelta(upwashAngle);
     reportFull.addPolar(leewayIn);    reportFull.addPolar(leewayOut);
     reportFull.addPolar(trueWindIn);
     reportFull.addPolar(heightIn);    reportFull.addPolar(heightOut);
@@ -619,8 +632,12 @@ module.exports = function (app) {
 
       // --- Upwash ---
       upwashIn.copyFrom(calculatedWind);
+      // Always compute the angle for display (even when correction is disabled).
+      const computedUpwash = approximateUpwash(calculatedWind.angle);
+      upwashAngle.value = computedUpwash;
+      upwashAngle.stale = false;
       if (options.correctForUpwash) {
-        calculatedWind.rotate(-approximateUpwash(calculatedWind.angle));
+        calculatedWind.rotate(-computedUpwash);
       }
       upwashOut.copyFrom(calculatedWind);
 
@@ -643,7 +660,7 @@ module.exports = function (app) {
         calculatedWind.copyFrom(trueWind);
         calculatedWind.add(boatSpeed);
       }
-      heightOut.copyFrom(calculatedWind);
+      heightOut.copyFrom(trueWind);  // always the height-corrected true wind (= heightIn if disabled)
 
       // --- Back-calculate apparent wind ---
       // calculatedWind at this point = corrected apparent wind (trueWind + boatSpeed,
@@ -671,6 +688,7 @@ module.exports = function (app) {
       Polar.send(app, plugin.id, outputsToSend);
 
       function approximateUpwash(angle) {
+        if (isNaN(options.upwashSlope) || isNaN(options.upwashOffset)) return 0;
         return (options.upwashSlope * angle + options.upwashOffset * Math.PI / 180) * Math.max(0, Math.cos(angle));
       }
 
@@ -716,7 +734,6 @@ module.exports = function (app) {
             apparentWind.polar.angleHandler.passOn = !value;
             break;
           default:
-            // Plain value options (booleans, numbers, strings) go straight into options
             options[key] = value;
             break;
         }
@@ -754,6 +771,7 @@ module.exports = function (app) {
         heightIn   = null;  heightOut   = null;
         backCalcOut = null;
         groundWindIn = null;
+        upwashAngle  = null;
         app.debug("plugin stopped");
         app.setPluginStatus("Stopped");
         resolve();

@@ -53,16 +53,18 @@ function _drawVectors(svg, polars, heading, scale) {
       id: polar.id
     });
 
-    let dash;
-    let s = scale * 5 / 1.94384 - 1;
-    if (s > 50) {
-      s = s / 5;
-      dash = `1 1 ${s - 1} 1 ${s} 1 ${s} 1 ${s} 1 ${s - 1} 1 `;
-    } else {
-      dash = `1 1 ${s - 1} 1 ${s} 1 `;
+    if (!polar.solid) {
+      let dash;
+      let s = scale * 5 / 1.94384 - 1;
+      if (s > 50) {
+        s = s / 5;
+        dash = `1 1 ${s - 1} 1 ${s} 1 ${s} 1 ${s} 1 ${s - 1} 1 `;
+      } else {
+        dash = `1 1 ${s - 1} 1 ${s} 1 `;
+      }
+      vector.setAttribute("stroke-dasharray", dash);
+      vector.setAttribute("stroke-dashoffset", "1");
     }
-    vector.setAttribute("stroke-dasharray", dash);
-    vector.setAttribute("stroke-dashoffset", "1");
 
     const plane = polar.displayAttributes && polar.displayAttributes.plane;
     vector.setAttribute("transform",
@@ -72,37 +74,141 @@ function _drawVectors(svg, polars, heading, scale) {
   });
 }
 
+// Build the list of polar-like objects to show in the SVG for the current scene.
+// Returns { polars: [...], showBoatSpeed: bool }.
+// id on each object controls CSS colour; aliasing reuses existing colour rules.
+function _buildScenePolars(stepId, cfg, st) {
+  const pb = st.polarsById;
+  // Clone a polar with a different id for colour mapping.
+  const as = (src, id) => src ? { ...src, id } : null;
+  const ok = arr => arr.filter(Boolean);
+
+  // Geometry-based heel and mastMove vectors (bypass wind scale).
+  // heelVector: mast tip displacement = sin(pitch)×112.5 fore-aft, sin(roll)×112.5 lateral.
+  // mastMoveVector: sensor velocity (m/s) scaled to SVG units via mast height.
+  const mastH = (cfg && cfg.heightAboveWater) || 18;
+  const svgPerMetre = 112.5 / mastH;
+  const attObj = st.attitudesById["attitude"];
+  const roll  = attObj && attObj.value ? (attObj.value.roll  || 0) : 0;
+  const pitch = attObj && attObj.value ? (attObj.value.pitch || 0) : 0;
+
+  switch (stepId) {
+    case "overview": {
+      const list = [];
+      // Suppress apparentWind when back-calc replaces it in SK.
+      if (!(cfg.backCalculateApparentWind && cfg.preventDuplication))
+        list.push(pb.apparentWind);
+      list.push(pb.trueWind);
+      if (cfg.backCalculateApparentWind) list.push(as(pb.backCalcOut, "correctedWind"));
+      if (cfg.calculateGroundWind)       list.push(pb.groundWind);
+      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
+    }
+    case "inputs":
+      return { polars: ok([pb.apparentWind]), geoPolars: [], showBoatSpeed: false };
+    case "misalign": {
+      const list = [as(pb.misalignIn, "apparentWind")];
+      if (cfg.correctForMisalign)     list.push(as(pb.misalignOut, "correctedWind"));
+      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
+    }
+    case "mastRot": {
+      const list = [as(pb.mastRotIn, "apparentWind")];
+      if (cfg.correctForMastRotation) list.push(as(pb.mastRotOut, "correctedWind"));
+      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
+    }
+    case "mastHeel": {
+      const list = [as(pb.mastHeelIn, "apparentWind")];
+      const geo = [];
+      if (cfg.correctForMastHeel) {
+        list.push(as(pb.mastHeelOut, "correctedWind"));
+        // Geometry-based: mast tip displacement from roll (lateral) and pitch (fore-aft).
+        // x = sin(pitch)×112.5, y = sin(roll)×112.5 SVG units (mast height cancels).
+        geo.push({ id: "heelVector", x: Math.sin(pitch) * 112.5, y: Math.sin(roll) * 112.5,
+                   solid: true, displayAttributes: { plane: "Boat" } });
+      }
+      return { polars: ok(list), geoPolars: ok(geo), showBoatSpeed: false };
+    }
+    case "mastMove": {
+      const list = [as(pb.mastMoveIn, "apparentWind")];
+      const geo = [];
+      if (cfg.correctForMastMovement) {
+        list.push(as(pb.mastMoveOut, "correctedWind"));
+        if (pb.sensorSpeed) {
+          // sensorSpeed is in m/s; scale to SVG units via mast height.
+          geo.push({ id: "mastMoveVector",
+                     x: (pb.sensorSpeed.x || 0) * svgPerMetre,
+                     y: (pb.sensorSpeed.y || 0) * svgPerMetre,
+                     solid: true, displayAttributes: { plane: "Boat" } });
+        }
+      }
+      return { polars: ok(list), geoPolars: ok(geo), showBoatSpeed: false };
+    }
+    case "upwash": {
+      const list = [as(pb.upwashIn, "apparentWind")];
+      if (cfg.correctForUpwash) list.push(as(pb.upwashOut, "correctedWind"));
+      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
+    }
+    case "leeway": {
+      const list = [as(pb.leewayIn, "apparentWind")];
+      if (cfg.correctForLeeway) list.push(as(pb.leewayOut, "correctedWind"));
+      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
+    }
+    case "trueWind": {
+      // trueWindIn = corrected apparent wind entering true-wind step
+      const list = [as(pb.trueWindIn, "apparentWind"), pb.trueWind];
+      return { polars: ok(list), geoPolars: [], showBoatSpeed: true };
+    }
+    case "height": {
+      // heightIn = trueWind before height scaling; trueWind = after scaling (in place)
+      const list = [as(pb.heightIn, "trueWind")];
+      if (cfg.correctForHeight) list.push(as(pb.heightOut, "correctedWind"));
+      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
+    }
+    case "backCalc": {
+      const list = [pb.trueWind, as(pb.backCalcOut, "correctedWind")];
+      return { polars: ok(list), geoPolars: [], showBoatSpeed: true };
+    }
+    case "groundWind": {
+      const list = [as(pb.groundWindIn, "apparentWind"), pb.groundSpeed, pb.groundWind];
+      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
+    }
+    case "outputs": {
+      const list = [pb.trueWind];
+      if (cfg.backCalculateApparentWind) list.push(as(pb.backCalcOut, "correctedWind"));
+      if (cfg.calculateGroundWind)       list.push(pb.groundWind);
+      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
+    }
+    default:
+      return { polars: ok([pb.apparentWind, pb.trueWind]), geoPolars: [], showBoatSpeed: false };
+  }
+}
+
 function renderSVG() {
   const svg = document.getElementById("insight-canvas");
   if (!svg) return;
   svg.innerHTML = "";
 
   const cfg = config || {};
-
-  // Whitelist: only draw polars that are genuinely active.
-  // boatSpeed polar is suppressed here and redrawn as a scalar below.
-  const GRAPH_WHITELIST = new Set(["apparentWind", "trueWind"]);
-  if (cfg.calculateGroundWind) {
-    GRAPH_WHITELIST.add("groundWind");
-    GRAPH_WHITELIST.add("groundSpeed");
-  }
-  const polars = Object.values(state.polarsById).filter(p => GRAPH_WHITELIST.has(p.id));
   const headingDelta = state.deltasById["heading"];
   const heading = headingDelta ? headingDelta.value * 180 / Math.PI : 0;
 
-  // Include boatSpeed scalar in scale calculation so it never clips.
-  const boatSpeedDelta = state.deltasById["boatSpeed"];
-  const boatSpeedVal   = boatSpeedDelta ? (boatSpeedDelta.value || 0) : 0;
+  const { polars, geoPolars, showBoatSpeed } = _buildScenePolars(currentStepId, cfg, state);
 
+  // boatSpeed: include in scale even when drawn separately.
+  const boatSpeedDelta = state.deltasById["boatSpeed"];
+  const boatSpeedVal   = showBoatSpeed && boatSpeedDelta ? (boatSpeedDelta.value || 0) : 0;
+
+  // Wind polars drive the auto-scale; geometry polars (heelVector, mastMoveVector)
+  // are already in SVG units and bypass the wind scale (drawn at scale=1).
   let largest = Math.max(_getLargest(polars), Math.abs(boatSpeedVal));
   if (largest < 1) largest = 1;
   const scale = _smoothScale(largest);
 
   _drawBoat(svg, heading);
   _drawVectors(svg, polars, heading, scale);
+  if (geoPolars && geoPolars.length) _drawVectors(svg, geoPolars, heading, 1);
 
-  // Draw boatSpeed as a pure forward vector (no leeway component).
-  if (boatSpeedVal > 0) {
+  // Draw boatSpeed as a pure forward (no leeway) dashed vector.
+  if (showBoatSpeed && boatSpeedVal > 0) {
     const len = boatSpeedVal * scale;
     let dash;
     let s = scale * 5 / 1.94384 - 1;
@@ -114,7 +220,7 @@ function renderSVG() {
     }
     const v = _svgEl("line", {
       x1: 0, y1: 0,
-      x2: len, y2: 0,        // forward = +x in boat frame
+      x2: len, y2: 0,
       id: "boatSpeed",
       "stroke-dasharray": dash,
       "stroke-dashoffset": "1",
@@ -378,7 +484,8 @@ const stepConfigs = {
     correctionFlag: "correctForUpwash",
     parameters: ["upwashSlope", "upwashOffset"],
     inputs:  [
-      { type: "polar", id: "upwashIn" }
+      { type: "polar", id: "upwashIn" },
+      { type: "delta", id: "upwashAngle" }
     ],
     outputs: [
       { type: "polar", id: "upwashOut" }
@@ -509,10 +616,18 @@ function formatStateValue(type, data) {
 }
 
 // Build a 2-column table (Name | Value) for an array of typed descriptors.
+// Supports type "computed" for client-side calculated values.
 function createDataTable(items) {
   const table = document.createElement("table");
   table.className = "scene-table";
   items.forEach(item => {
+    // --- Computed (client-side calculated) rows ---
+    if (item.type === "computed") {
+      const row = table.insertRow();
+      row.insertCell().textContent = item.label || item.id;
+      row.insertCell().textContent = _computeValue(item.id);
+      return;
+    }
     const data = getStateItem(item);
     const row  = table.insertRow();
     if (isStale(data)) row.className = "stale";
@@ -848,7 +963,7 @@ async function start() {
   await fetchConfig();
   renderAll();
   await tick();
-  setInterval(tick, 1000);
+  setInterval(tick, 100);
 }
 
 window.addEventListener("DOMContentLoaded", () => {
