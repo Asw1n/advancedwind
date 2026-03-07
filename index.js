@@ -46,7 +46,6 @@ module.exports = function (app) {
     const stored = app.readPluginOptions();
     // Unwrap double-nested configuration if present (migration)
     let temp = stored.configuration || {};
-    app.debug("reading options:", temp);
     if (temp.configuration) {
       app.debug("Migrating double-nested configuration");
       options = { ...temp.configuration };
@@ -80,8 +79,6 @@ module.exports = function (app) {
     app.savePluginOptions({ ...options }, (err) => {
       if (err) {
         app.error(`Error saving plugin options: ${err.message}`);
-      } else {
-        app.debug("Plugin options saved successfully");
       }
     });
   }
@@ -91,161 +88,12 @@ module.exports = function (app) {
   plugin.name = "Advanced Wind";
   plugin.description = "A plugin that calculates true wind while optionally correcting for vessel motion, upwash, leeway and mast height.";
   // Plugin is configured via the custom webapp (insight.html), not the Signal K admin UI.
-  plugin.schema   = { type: "object", properties: {} };
+  plugin.schema   = {
+    type: "object",
+    description: "Advanced Wind is configured through its own webapp. Open it from the Signal K app list (Webapps → Advanced Wind) to set sources, enable corrections and adjust parameters.",
+    properties: {}
+  };
   plugin.uiSchema = {};
-
-  // --- Archived schema (kept for reference) ---
-  // plugin.schema = {
-  //   type: "object",
-  //   properties: {
-  //     corrections: {
-  //       type: "object",
-  //       title: "Corrections",
-  //       description: "Enable and configure wind corrections.",
-  //       properties: {
-  //         correctForMisalign: {
-  //           type: "boolean",
-  //           title: "Correct for sensor misalignment",
-  //           description: "A misaligned sensor gives faulty wind direction.",
-  //           default: false
-  //         },
-  //         correctForMastRotation: {
-  //           type: "boolean",
-  //           title: "Correct for mast rotation",
-  //           description: "For vessels with a rotating mast. The correction aligns the sensor with the vessel.",
-  //           default: false
-  //         },
-  //         correctForMastHeel: {
-  //           type: "boolean",
-  //           title: "Adjust for sensor tilt on a heeled mast",
-  //           description: "A heeled mast tilts the wind sensor, causing it to underreport wind speed. This correction calculates the tilt effect based on the boat's heel and pitch, restoring accurate wind measurements.",
-  //           default: false
-  //         },
-  //         correctForMastMovement: {
-  //           type: "boolean",
-  //           title: "Compensate for mast motion due to waves",
-  //           description: "The mast amplifies the vessel's rolling and pitching, introducing errors in wind speed and angle measurements. This correction removes the influence of mast motion by accounting for the sensor's movement.",
-  //           default: false
-  //         },
-  //         correctForUpwash: {
-  //           type: "boolean",
-  //           title: "Account for upwash distortion",
-  //           description: "Sails bend the airflow, causing the apparent wind angle at the sensor to differ from the true wind angle. This correction estimates and compensates for upwash, improving wind direction accuracy.",
-  //           default: false
-  //         },
-  //         correctForLeeway: {
-  //           type: "boolean",
-  //           title: "Account for leeway",
-  //           description: "Leeway is the sideways drift of a vessel caused by wind. This correction compensates for leeway, improving wind direction accuracy.",
-  //           default: false
-  //         },
-  //         correctForHeight: {
-  //           type: "boolean",
-  //           title: "Normalize wind speed to 10 meters above sea level",
-  //           description: "Wind speed increases with height above the ground or water. To compare your boat's performance to polar data (based on a 10-meter wind height), this correction adjusts measured wind speed using the height of your sensor and a wind gradient model.",
-  //           default: false
-  //         }
-  //       }
-  //     },
-  //     outputOptions: {
-  //       type: "object",
-  //       title: "Output Options",
-  //       description: "Choose output options.",
-  //       properties: {
-  //         calculateGroundWind: {
-  //           type: "boolean",
-  //           title: "Calculate ground wind",
-  //           description: "Calculate the wind speed over ground and direction relative to true north.",
-  //           default: false
-  //         },
-  //         backCalculateApparentWind: {
-  //           type: "boolean",
-  //           title: "Back calculate apparent wind",
-  //           description: "Applies corrections to the apparent wind based on the vessel's motion and environmental factors.",
-  //           default: true
-  //         },
-  //         preventDuplication: {
-  //           type: "boolean",
-  //           title: "Replace apparent wind",
-  //           description: "Replace incoming apparent wind with corrected apparent wind to prevent duplication of apparent wind delta's",
-  //           default: true
-  //         }
-  //       }
-  //     },
-  //     parameters: {
-  //       type: "object",
-  //       title: "Parameters",
-  //       description: "Set parameters for the wind corrections.",
-  //       properties: {
-  //         sensorMisalignment: {
-  //           type: "number",
-  //           title: "Misalignment of the wind sensor (°)",
-  //           description: "Enter the misalignment of the windsensor in degrees",
-  //           default: 0,
-  //         },
-  //         heightAboveWater: {
-  //           type: "number",
-  //           title: "Wind sensor height Above Water (meters)",
-  //           description: "Enter the height of the wind sensor above the waterline in meters. This is used for wind gradient correction and mast motion correction.",
-  //           default: 15
-  //         },
-  //         windExponent: {
-  //           type: "number",
-  //           title: "Wind gradient parameter (α)",
-  //           description: "This parameter defines how wind speed changes with height. Typical values are 0.1 to 0.15, depending on atmospheric conditions.",
-  //           default: 0.14
-  //         },
-  //         upwashSlope: {
-  //           type: "number",
-  //           title: "Upwash slope (α)",
-  //           description: "Defines the sensitivity of upwash correction to apparent wind angle.",
-  //           default: 0.05,
-  //           minimum: 0,
-  //           maximum: 0.3,
-  //         },
-  //         upwashOffset: {
-  //           type: "number",
-  //           title: "Upwash offset(°) (β)",
-  //           description: "Adds a constant offset to the upwash correction.",
-  //           default: 1.5,
-  //           minimum: -1,
-  //           maximum: 4
-  //         },
-  //         timeConstant: {
-  //           type: "number",
-  //           title: "Input smoothing time constant",
-  //           description: "Smooths input values exponentially. A time constant of 0 disables smoothing.",
-  //           default: 1,
-  //           minimum: 0,
-  //           maximum: 10
-  //         }
-  //       }
-  //     },
-  //     dataSources: {
-  //       type: "object",
-  //       title: "Data Sources",
-  //       description: "Select the data sources for the input paths.",
-  //       properties: {
-  //         headingSource:    { type: "string", title: "Heading Source",      default: "" },
-  //         attitudeSource:   { type: "string", title: "Attitude Source",     default: "" },
-  //         boatSpeedSource:  { type: "string", title: "Boat Speed Source",   default: "" },
-  //         windSpeedSource:  { type: "string", title: "Wind Speed Source",   default: "" },
-  //         rotationPath:     { type: "string", title: "Path for mast rotation" },
-  //         rotationSource:   { type: "string", title: "Mast rotation Source", default: "" },
-  //         groundSpeedSource:{ type: "string", title: "Ground Speed Source", default: "" }
-  //       }
-  //     }
-  //   }
-  // };
-  //
-  // plugin.uiSchema = {
-  //   'ui:order': ['corrections', 'outputOptions', 'parameters', 'dataSources'],
-  //   corrections:   { 'ui:options': { tab: 'Corrections',    description: 'Enable and configure wind corrections.' } },
-  //   outputOptions: { 'ui:options': { tab: 'Output Options', description: 'Choose output options.' } },
-  //   parameters:    { 'ui:options': { tab: 'Parameters',     description: 'Set parameters for the wind corrections.' } },
-  //   dataSources:   { 'ui:options': { tab: 'Data Sources',   description: 'Select the data sources for the input paths.' } }
-  // };
-  // --- End archived schema ---
 
   let reportFull = null;
   let heading = null;
@@ -283,25 +131,6 @@ module.exports = function (app) {
     // the /config GET endpoint serves real data before plugin.start() is called.
     readOptions();
 
-
-    router.get('/getResults', (req, res) => {
-      if (!isRunning) {
-        res.status(503).json({ error: "Plugin is not running" });
-      }
-      else {
-        res.json(reportFull?.report());
-      }
-
-    });
-
-    router.get('/getVectors', (req, res) => {
-      if (!isRunning) {
-        res.status(503).json({ error: "Plugin is not running" });
-      }
-      else {
-        res.json(reportFull?.report());
-      }
-    });
 
     // Endpoint for full Reporter-based state snapshot
     router.get('/state', (req, res) => {
@@ -471,8 +300,8 @@ module.exports = function (app) {
       pathMagnitude: "environment.wind.speedApparent",
       pathAngle: "environment.wind.angleApparent",
       subscribe: true,
-      sourceMagnitude: options.apparentWindSource,
-      sourceAngle: options.apparentWindSource,
+      sourceMagnitude: options.windSpeedSource,
+      sourceAngle: options.windSpeedSource,
       app: app,
       pluginId: plugin.id,
       SmootherClass: KalmanSmoother,
@@ -702,6 +531,7 @@ module.exports = function (app) {
       // Pop each key-value pair from changedOptions
       for (const key of Object.keys(changedOptions)) {
         const value = changedOptions[key];
+        options[key] = value;
         switch (key) {
           case 'headingSource':
             heading.handler.source = value;
@@ -732,9 +562,6 @@ module.exports = function (app) {
           case 'preventDuplication':
             apparentWind.polar.magnitudeHandler.passOn = !value;
             apparentWind.polar.angleHandler.passOn = !value;
-            break;
-          default:
-            options[key] = value;
             break;
         }
         delete changedOptions[key];

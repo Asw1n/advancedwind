@@ -1,4 +1,4 @@
-# Advanced wind  Plugin for SignalK
+﻿# Advanced wind  Plugin for SignalK
 
 ## Function and goal of the plugin
 The Advanced wind plugin is a plugin for SignalK server that calculates true wind from wind sensor data  and peddle wheel data. It also calculates ground wind using wind sensor data using GPS and compass data.
@@ -44,7 +44,7 @@ SignalK does not have a defined path for mast rotation. The path to use has to b
 ### Going from mast to vessel, Upwash correction
 The sails of a vessel do bend the wind, A phenomena that is called upwash. The wind angle measured by the wind sensor can to be corrected for this. The amount of upwash depends on the sailplan, on the position of the sensor and on the wind angle. Upwash can not be measured but it can be estimated. The plugin uses this formula to estimate upwash: Upwash Angle (°) =  (α ⋅ wind_angle(°) + β(°)) ⋅ max(0, cos(wind_angle)).
 In this formula alpha and beta are parameters that can be set in the plugin options.
-![Alt text](upwash.png)
+
 
 ### Going from vessel to water, Leeway correction
 The wind not only pushes a boat forward but also a bit sideways to leeward. This effect is called leeway. Most speed sensors only measure forward speed of the vessel and leeway is ignored. But to properly calculate water_wind leeway should be taken into account. 

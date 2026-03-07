@@ -36,9 +36,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Ground wind speed and direction are calculated
 - Ground wind direction uses 0 to 2PI range instead of (-PI to PI)
 
-## [2.4.0] - ntb
+## [2.5.0] - 2026-03-08
 ### Added
-- Effect of each individual correction is shown in the webapp
-- Visual indication of missing or stale inputs in the webapp
+- New webapp that provides insight in every correction and calculation and that lets you configure the plugin.
+
+### Removed
+- Old webapp
+- Standalone SVG view (`vectors.html`, `vectors.js`)
+- Legacy API routes `/getResults` and `/getVectors`
+- Standard signalk configuration
+
 ### Fixed
-- Bug in removing duplicate apparent wind speed when writing back-calculated apparent wind speed
+- Double correction for leeway

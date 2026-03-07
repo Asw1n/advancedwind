@@ -1,4 +1,4 @@
-# Advanced Wind – Plugin Background Reference
+﻿# Advanced Wind – Plugin Background Reference
 
 This document is intended for AI agents and developers who need to understand the
 codebase quickly. It covers the purpose of the plugin, the data model, every
@@ -36,14 +36,9 @@ index.js          – Signal K plugin entry point (all server-side logic)
 package.json      – npm metadata and Signal K plugin declaration
 CHANGELOG.md      – version history
 public/
-  index.html      – existing diagnostic webapp (data tables + SVG vectors)
-  app.js          – JavaScript for index.html
-  vectors.html    – standalone SVG vector view (legacy)
-  vectors.js      – JavaScript for vectors.html
-  TableRenderer.js – reusable ES-module class for 2-D polar tables
-  insight.html    – NEW webapp (partially implemented)
-  insight.js      – JavaScript for insight.html (partially implemented)
-  main.css        – shared stylesheet for all webapps
+  index.html      – webapp (pipeline inspector, step-by-step view, live config)
+  insight.js      – JavaScript for index.html
+  main.css        – stylesheet
 ```
 
 ---
@@ -218,20 +213,18 @@ Example flat options object (`options` variable at runtime):
 4. **Version 3.0** – uses as-is (flat).
 
 ### Runtime config changes
-The `/config` PUT endpoint accumulates changes in `changedOptions`. On the next
+The `/settings` PUT endpoint accumulates changes in `changedOptions`. On the next
 `calculate()` call, `applyOptionChanges()` applies source/path changes to live
 handlers. **Note:** Only specific keys are handled by `applyOptionChanges()`
 (source string changes, `preventDuplication`). Feature flags
 (`correctForMisalign` etc.) take effect immediately on the next call because
 `calculate()` reads directly from `options`.
 
-The `/config` PUT endpoint returns `{ success: true }`, not the full options
-object. Callers must update their local cache manually after a successful write.
+The `/settings` PUT endpoint returns the full merged options object, so callers
+can update their local cache from the response without a second request.
 
-**Important – schema direction:** The grouped `plugin.schema` / `plugin.uiSchema`
-(Signal K admin UI tabs) are retained for now but are considered legacy. Once the
-Insight webapp is the primary configuration interface the schema will be replaced
-with an empty object so that Signal K no longer exposes its own config form.
+**Important – schema direction:** `plugin.schema` and `plugin.uiSchema` are set
+to empty objects. The webapp (`index.html`) is the sole configuration interface.
 
 ---
 
@@ -241,11 +234,9 @@ All endpoints are prefixed with `/plugins/advancedwind`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/state` | Full Reporter snapshot (polars, deltas, attitudes, tables). Primary data source for webapps. |
-| `GET` | `/getResults` | Alias for `/state` (used by `index.html` / `app.js`). |
-| `GET` | `/getVectors` | Alias for `/state` (used by `vectors.html`). |
-| `GET` | `/config` | Returns current flat `options` object. |
-| `PUT` | `/config` | Accepts partial flat or grouped options; merges into `changedOptions`. Returns `{ success: true }`. |
+| `GET` | `/state` | Full Reporter snapshot (polars, deltas, attitudes, tables). Primary data source for the webapp. |
+| `GET` | `/settings` | Returns current flat `options` object. |
+| `PUT` | `/settings` | Accepts partial flat options; merges into `changedOptions`. Returns the full merged options object. |
 | `GET` | `/sources?path=<sk-path>` | Placeholder – returns `{ path, sources: [] }`. Not yet implemented. |
 
 ---
@@ -296,56 +287,24 @@ has consistent data regardless of which corrections are enabled.
 
 ---
 
-## 9. Existing webapp: `index.html` / `app.js`
+## 9. Webapp: `index.html` / `insight.js`
 
-A diagnostic tool that polls `/getResults` every second and renders:
+The pipeline inspector served by Signal K at `/plugins/advancedwind/`. It
+provides a step-by-step view of the entire correction pipeline:
 
-- **SVG vector diagram** – boat symbol + all polar vectors overlaid, boat
-  orientation from heading, auto-scaled.
-- **Deltas table** – scalar values (heading, mast rotation).
-- **Vectors (polars) table** – speed + angle for every polar.
-- **Attitude table** – roll / pitch / yaw.
-- **2-D correction tables** – rendered by `TableRenderer.js` (Plotly surface
-  plot available via `createSurfacePlot()`).
-
-Menu controls: speed unit (m/s / knots / km/h), angle unit (radians / degrees),
-table style (cartesian / polar), pause/resume.
-
-**`app.js`** is a non-module script (no `import`/`export` in HTML context). It
-uses `TableRenderer.js` as an ES module via dynamic import.
+- **Step sidebar** – one nav item per correction step; clicking a step makes it
+  active and updates the SVG canvas and right panel.
+- **SVG canvas** – live vector diagram showing the relevant polars for the
+  current step, auto-scaled and smoothed.
+- **Right panel** – step description, enable/disable checkbox (for optional
+  corrections), parameter controls (number inputs, checkboxes, source selectors),
+  real-time input and output values, stale-source warnings.
+- **Config roundtrip** – `PUT /settings` is called on every control change;
+  the full merged options object is returned and replaces the local config cache.
 
 ---
 
-## 10. Standalone SVG view: `vectors.html` / `vectors.js`
-
-An older, simpler page that draws all polar vectors as SVG lines on a normalised
-coordinate system, with smooth auto-scaling. Uses the legacy `/getVectors`
-endpoint. Boat-plane vectors rotate with heading; ground-plane vectors are fixed.
-
----
-
-## 11. `TableRenderer.js`
-
-A reusable ES module class for rendering 2-D tables (e.g. polar correction
-matrices keyed by boat speed × heel angle). Data format:
-
-```js
-{
-  id: "someTable",
-  row: { min, max, step },
-  col: { min, max, step },
-  table: [[{ x, y, N, displayAttributes }, ...], ...],
-  displayAttributes: { label }
-}
-```
-
-- `setCellFormat(fn)` – custom cell renderer `(cellValue, rowValue, colValue) => htmlString | null`
-- `setColumnHeaderFormat(fn)` / `setRowHeaderFormat(fn)` – header formatters
-- `createSurfacePlot()` – opens a Plotly 3-D surface plot in a new window
-
----
-
-## 12. New webapp: `insight.html` / `insight.js` (partially implemented)
+## 10. New webapp: `index.html` / `insight.js`
 
 ### Goal
 A step-by-step interactive view of the entire calculation pipeline. For each
@@ -356,12 +315,12 @@ correction step the user can:
 - Adjust parameters
 - Understand the effect visually
 
-### Current state (partially implemented)
-- **Layout (`insight.html`)**: Header, left nav sidebar, central canvas, right
+### Current state
+- **Layout (`index.html`)**: Header, left nav sidebar, central canvas, right
   panel. Loads `insight.js` as an ES module.
 - **Navigation**: Sidebar with one button per step. Steps are defined in the
   `steps` array.
-- **Data loop**: Polls `/state` every second; also fetches `/config` once at
+- **Data loop**: Polls `/state` at 100 ms; also fetches `/settings` once at
   startup. State is normalised into `state.polarsById`, `deltasById` etc.
 - **Panel rendering** (`renderPanel`): Implements a fixed seven-section layout per step:
   1. Scene title (rendered in the `<h2>` above the panel)
@@ -377,11 +336,10 @@ correction step the user can:
      `correctionFlag` is set and at least one input source is stale or absent
 - **`paramMeta`**: module-level object mapping every flat config key to
   `{ label, unit, type, step?, min?, max? }`, consumed by the settings table.
-- **Canvas** (`renderCanvasScene`): Only the `overview` scene is implemented.
-  All other scenes fall back to the overview rendering.
+- **Canvas** (`renderSVG`): Renders a vector diagram for each step via
+  `_buildScenePolars`. Uses the step `id` to select which polars to draw.
 - **Config updates** (`updateConfigAtPath`): Sends flat `{ [key]: value }` to
-  `/config`. Updates local cache manually on success (PUT returns `{ success: true }`,
-  not the full config object).
+  `/settings`. Returns the full merged options object which replaces the local cache.
 
 ### Steps defined in `insight.js`
 
@@ -459,12 +417,7 @@ their id as an HTML `id` attribute. Colour assignments:
 
 | Variable | Colour | Used for |
 |---|---|---|
-| `--apparentWind-color` | `#0288d1` medium blue | apparent wind |
-| `--trueWind-color` | `#00bcd4` cyan | true wind |
-| `--groundWind-color` | `#1976d2` strong blue | ground wind |
-| `--correctedApparentWind-color` | `#26c6da` soft cyan | calculatedWind |
-| `--boatSpeed-color` | `#388e3c` dark green | boat speed |
-| `--groundSpeed-color` | `#5d4037` dark brown | ground speed |
+| `--groundWind-color` | `#1976d262` semi-transparent blue | ground wind vector |
 
 `.stale` class → `background-color: orangered` – applied to rows/elements whose
 source data is missing or outdated.
@@ -492,7 +445,7 @@ source data is missing or outdated.
 5. **Ground-plane vectors use a `0 to 2π` angle range**; boat-plane vectors use
    `−π to π`.
 
-6. **The REST `/config` PUT endpoint is additive.** It merges incoming keys into
+6. **The REST `/settings` PUT endpoint is additive.** It merges incoming keys into
    `changedOptions`, which are drained on the next `calculate()` call. Changes
    to correction flags take effect immediately (options are read inside
    `calculate()`). Changes to source strings and paths are applied via
@@ -510,6 +463,3 @@ source data is missing or outdated.
   (misalignment, mast heel, mast movement, upwash, leeway, height, ground wind).
 - [ ] Implement the `/sources` endpoint to enumerate available Signal K sources
   per path (currently returns an empty list).
-- [ ] Replace `plugin.schema` / `plugin.uiSchema` with an empty schema once the
-  Insight webapp covers all configuration needs, so Signal K no longer shows its
-  own config form for this plugin.

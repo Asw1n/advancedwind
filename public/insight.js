@@ -240,19 +240,19 @@ let config = null;
 
 // Navigation / steps
 const steps = [
-  { id: "overview",   label: "Overview",       scene: "overview" },
-  { id: "inputs",     label: "Inputs",         scene: "inputs" },
-  { id: "misalign",   label: "Misalignment",   scene: "misalignment" },
-  { id: "mastRot",    label: "Mast Rotation",  scene: "mastRotation" },
-  { id: "mastHeel",   label: "Mast Heel",      scene: "mastHeel" },
-  { id: "mastMove",   label: "Mast Movement",  scene: "mastMovement" },
-  { id: "upwash",     label: "Upwash",         scene: "upwash" },
-  { id: "leeway",     label: "Leeway",         scene: "leeway" },
-  { id: "trueWind",   label: "True Wind",      scene: "trueWind" },
-  { id: "height",     label: "Height / 10m",   scene: "height" },
-  { id: "backCalc",   label: "Back Calc AW",   scene: "backCalc" },
-  { id: "groundWind", label: "Ground Wind",    scene: "groundWind" },
-  { id: "outputs",    label: "Outputs",        scene: "outputs" }
+  { id: "overview",   label: "Overview" },
+  { id: "inputs",     label: "Inputs" },
+  { id: "misalign",   label: "Misalignment" },
+  { id: "mastRot",    label: "Mast Rotation" },
+  { id: "mastHeel",   label: "Mast Heel" },
+  { id: "mastMove",   label: "Mast Movement" },
+  { id: "upwash",     label: "Upwash" },
+  { id: "leeway",     label: "Leeway" },
+  { id: "trueWind",   label: "True Wind" },
+  { id: "height",     label: "Height / 10m" },
+  { id: "backCalc",   label: "Back Calc AW" },
+  { id: "groundWind", label: "Wind direction" },
+  { id: "outputs",    label: "Outputs" }
 ];
 
 let currentStepId = "overview";
@@ -384,7 +384,7 @@ const paramMeta = {
   rotationPath:              { label: "Mast rotation path",                                                 unit: "",   type: "string" },
   rotationSource:            { label: "Mast rotation source",  path: "(see rotation path above)",          unit: "",   type: "string", sourceOf: { type: "delta",    id: "mast" } },
   groundSpeedSource:         { label: "Ground speed source",   path: "navigation.speedOverGround",          unit: "",   type: "string", sourceOf: { type: "polar",    id: "groundSpeed" } },
-  calculateGroundWind:       { label: "Calculate ground wind",                   unit: "",   type: "boolean" },
+  calculateGroundWind:       { label: "Calculate Wind direction",                   unit: "",   type: "boolean" },
   backCalculateApparentWind: { label: "Back-calculate apparent wind",            unit: "",   type: "boolean" },
   preventDuplication:        { label: "Replace apparent wind (prevent duplication)", unit: "", type: "boolean" }
 };
@@ -423,7 +423,7 @@ const stepConfigs = {
     }
   },
   inputs: {
-    description: "Start of the calculation pipeline. The observed apparent wind enters here. Configure the Signal K source to use for wind measurements.",
+    description: "Start of the calculation pipeline. The observed apparent wind enters here.",
     correctionFlag: null,
     parameters: ["windSpeedSource"],
     inputs:  [
@@ -432,7 +432,7 @@ const stepConfigs = {
     outputs: []
   },
   misalign: {
-    description: "Subtracts a fixed offset from the apparent wind angle to correct for a misaligned wind sensor.",
+    description: "Correct for a misaligned wind sensor.",
     correctionFlag: "correctForMisalign",
     parameters: ["sensorMisalignment"],
     inputs:  [
@@ -443,7 +443,7 @@ const stepConfigs = {
     ]
   },
   mastRot: {
-    description: "Corrects the wind angle for vessels with a rotating mast by subtracting the mast rotation angle.",
+    description: "Correct for a rotating mast.",
     correctionFlag: "correctForMastRotation",
     parameters: ["rotationPath", "rotationSource"],
     inputs:  [
@@ -455,7 +455,7 @@ const stepConfigs = {
     ]
   },
   mastHeel: {
-    description: "Compensates for wind speed underreading caused by the sensor tilting with the heeled mast.",
+    description: "Compensates for wind speed underreading caused by the sensor tilting with a heeled mast.",
     correctionFlag: "correctForMastHeel",
     parameters: ["attitudeSource"],
     inputs:  [
@@ -467,7 +467,7 @@ const stepConfigs = {
     ]
   },
   mastMove: {
-    description: "Subtracts mast-tip velocity (from rolling/pitching) from apparent wind to remove wave-induced motion errors.",
+    description: "Correct for mast movement due to waves.",
     correctionFlag: "correctForMastMovement",
     parameters: ["heightAboveWater", "attitudeSource"],
     inputs:  [
@@ -480,7 +480,7 @@ const stepConfigs = {
     ]
   },
   upwash: {
-    description: "Rotates apparent wind angle to compensate for sail-induced upwash using a parametric formula.",
+    description: "Correct for sail-induced upwash.",
     correctionFlag: "correctForUpwash",
     parameters: ["upwashSlope", "upwashOffset"],
     inputs:  [
@@ -492,7 +492,7 @@ const stepConfigs = {
     ]
   },
   leeway: {
-    description: "Rotates the wind angle by the leeway angle to account for sideways hull drift through the water.",
+    description: "Correct for leeway.",
     correctionFlag: "correctForLeeway",
     parameters: ["leewaySource"],
     inputs:  [
@@ -504,7 +504,7 @@ const stepConfigs = {
     ]
   },
   trueWind: {
-    description: "Calculates true wind by subtracting boat speed from corrected apparent wind. This step is always active.",
+    description: "Calculates true wind by subtracting boat speed from apparent wind.",
     correctionFlag: null,
     parameters: ["boatSpeedSource"],
     inputs:  [
@@ -516,7 +516,7 @@ const stepConfigs = {
     ]
   },
   height: {
-    description: "Scales true wind speed to a reference height of 10 m using the wind gradient power law.",
+    description: "Scales true wind speed to a reference height of 10 m as used in weather forecasts and in polars.",
     correctionFlag: "correctForHeight",
     parameters: ["heightAboveWater", "windExponent"],
     inputs:  [
@@ -527,20 +527,21 @@ const stepConfigs = {
     ]
   },
   backCalc: {
-    description: "Back-calculates corrected apparent wind by adding boat speed back to corrected true wind. Enable this to output a corrected apparent wind to Signal K. 'Replace apparent wind' suppresses the original apparent wind delta to avoid duplication.",
+    description: "Back-calculates apparent wind and sends it to SignalK.",
     correctionFlag: "backCalculateApparentWind",
     parameters: [
       "preventDuplication"
     ],
     inputs:  [
-      { type: "polar", id: "heightOut" }
+      { type: "polar", id: "heightOut" },
+      { type: "delta", id: "boatSpeed" }
     ],
     outputs: [
       { type: "polar", id: "backCalcOut" }
     ]
   },
   groundWind: {
-    description: "Calculates wind over ground by rotating corrected vessel wind by heading and subtracting speed over ground.",
+    description: "Calculates wind direction (wind over ground).",
     correctionFlag: "calculateGroundWind",
     parameters: ["groundSpeedSource", "headingSource"],
     inputs:  [
@@ -616,18 +617,10 @@ function formatStateValue(type, data) {
 }
 
 // Build a 2-column table (Name | Value) for an array of typed descriptors.
-// Supports type "computed" for client-side calculated values.
 function createDataTable(items) {
   const table = document.createElement("table");
   table.className = "scene-table";
   items.forEach(item => {
-    // --- Computed (client-side calculated) rows ---
-    if (item.type === "computed") {
-      const row = table.insertRow();
-      row.insertCell().textContent = item.label || item.id;
-      row.insertCell().textContent = _computeValue(item.id);
-      return;
-    }
     const data = getStateItem(item);
     const row  = table.insertRow();
     if (isStale(data)) row.className = "stale";

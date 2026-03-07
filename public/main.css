@@ -12,9 +12,7 @@
   --signalk-text-secondary: #546E7A;/* secondary / label text */
 
   /* Vector colours — matched to SVG element IDs drawn by the graph */
-  --groundSpeed-color: #43A047;               /* ground speed vector */  --boatSpeed-color: #FFCC00;                 /* boat speed vector */  --apparentWind-color: #0288d1;              /* apparent wind */
-  --trueWind-color: #00bcd4;                  /* true wind */
-  --groundWind-color: #1976d262;                /* ground wind */
+  --groundWind-color: #1976d262;    /* ground wind */
 
 }
 
@@ -60,10 +58,6 @@ svg {
   border: 1px solid #ccc;
   height: auto;
   aspect-ratio: 1 / 1;
-  svg {
-  width: 100vmin;
-  height: 100vmin;
-    }
 }
 line {
   stroke-width: 2;
@@ -105,8 +99,8 @@ body {
   gap: 12px;
 }
 .menu-logo {
-  height: 34px;
-  width: auto;
+  height: auto;
+  width: 56px;
 }
 .menu-title {
   font-size: 18px;
@@ -196,14 +190,6 @@ body {
 }
 .insight-scene-panel {
   flex: 1 1 50%;
-}
-.surfacePlot {
-  width: 100%;
-  height: 100%;
-  border: 1px solid black;
-  padding: 0;
-  margin: 0;
-  position: relative;
 }
 
 /* --- Insight scene panel --- */

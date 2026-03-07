@@ -4,111 +4,54 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Advanced wind</title>
+  <title>Advanced Wind - Insight</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="main.css">
 </head>
 
 <body>
-
   <header class="menu-bar">
-    <!-- Speed Unit Selection -->
-    <div class="menu-item dropdown">
-      <label for="speed-unit">Speed:</label>
-      <select id="speed-unit" onchange="handleSpeedUnitChange(this.value)">
-        <option value="ms">m/s</option>
-        <option value="knots" selected>knots</option>
-        <option value="kmh">km/h</option>
-      </select>
+    <div class="menu-brand">
+      <img src="icon.png" alt="Advanced Wind" class="menu-logo">
+      <span class="menu-title">Advanced Wind</span>
     </div>
-
-    <!-- Angle Unit Selection -->
-    <div class="menu-item dropdown">
-      <label for="angle-unit">Angle:</label>
-      <select id="angle-unit" onchange="handleAngleUnitChange(this.value)">
-        <option value="radians">radians</option>
-        <option value="degrees" selected>degrees</option>
-      </select>
-    </div>
-
-    <!-- Table style Selection -->
-    <div class="menu-item dropdown">
-      <label for="table-style">Table style:</label>
-      <select id="table-style" onchange="handleTableStyleChange(this.value)">
-        <option value="cartesian" selected>cartesian</option>
-        <option value="polar" >polar</option>
-      </select>
-    </div>
-
-
-    <!-- Pause Button -->
-    <button id="toggle-updates" class="menu-item" onclick="toggleUpdates()">Pause</button>
-
-    <!-- messages -->
-
-    <div id="message">
-    </div>
-
+    <div id="message" class="menu-message"></div>
   </header>
 
-  <!-- Content below the fixed menu -->
-  <main class="content">
+  <div class="app-body">
+    <aside id="insight-nav" class="insight-nav"></aside>
 
-    <section class="graph">
-      <svg height="300px" width="300px" xmlns="http://www.w3.org/2000/svg" viewbox="-100 -100 200 200" id="canvas">
-      
-        <!-- Draw the paths -->
-      
-      
-        <path id="hull" d="M -45 10  Q 15 25 30 0 Q 15 -25 -45 -10 z" stroke="black" fill="none" stroke-width="1"
-          transform="rotate(-90), scale(1, 1)" />
-      
-        <line id="mast" x1="0" y1="0" x2="1" y2="8" stroke="brown" stroke-width="2" transform="rotate(-90)" />
-      
-      
-        Sorry, your browser does not support inline SVG.
-      </svg>
-    </section>
-
-
-    <section class=" data ">
-      <h2>Deltas</h2>
-      <div id="delta-container">
-        <!-- Speeds table will be populated here -->
+    <main class="content-area">
+      <div class="content-card">
+        <div class="card-subtitle" id="insight-title">Overview</div>
+        <section class="insight-scene">
+          <div class="insight-scene-columns">
+            <div class="insight-scene-canvas">
+              <svg id="insight-canvas" xmlns="http://www.w3.org/2000/svg"
+                   viewBox="-100 -100 200 200"
+                   style="width:100%;aspect-ratio:1/1;display:block;">
+              </svg>
+            </div>
+            <div class="insight-scene-panel">
+              <div id="insight-panel">
+                <p id="panel-description" class="scene-description"></p>
+                <div id="panel-enable"></div>
+                <div id="panel-settings"></div>
+                <div id="panel-sources"></div>
+                <div id="panel-inputs"></div>
+                <div id="panel-outputs"></div>
+                <div id="panel-warnings"></div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
-    </section>
+    </main>
+  </div>
 
-    <section class="data ">
-      <h2>Vectors</h2>
-      <div id="speeds-container">
-        <!-- Vectors table will be populated here -->
-      </div>
-    </section>
-
-    <section class="data ">
-      <h2>Attitude</h2>
-      <div id="attitude-container">
-        <!-- attitude table will be populated here -->
-      </div>
-    </section>
-
-
-    <section class="data ">
-      <div id="table-container">
-        <!-- Steps table will be populated here -->
-      </div>
-      
-    </section>
-
-
-  </main>
-
-
-
-
-
-
-  <script type="module" src="app.js"></script>
-  <script type="module" src="vectors.js"></script>
+  <script type="module" src="insight.js"></script>
 </body>
 
 </html>
