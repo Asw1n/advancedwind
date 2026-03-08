@@ -1,4 +1,4 @@
--check vanf upwash
-- check norm to 10 meters
 - north up graph
 - remove legacy files and code
+- make responsive
+- better texts

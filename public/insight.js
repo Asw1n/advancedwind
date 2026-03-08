@@ -103,8 +103,14 @@ function _buildScenePolars(stepId, cfg, st) {
       if (cfg.calculateGroundWind)       list.push(pb.groundWind);
       return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
     }
-    case "inputs":
-      return { polars: ok([pb.apparentWind]), geoPolars: [], showBoatSpeed: false };
+    case "inputs": {
+      const list = [pb.apparentWind];
+      if (cfg.calculateGroundWind) list.push(pb.groundSpeed);
+      const geo = [];
+      geo.push({ id: "heelVector", x: Math.sin(pitch) * 112.5, y: Math.sin(roll) * 112.5,
+                 solid: true, displayAttributes: { plane: "Boat" } });
+      return { polars: ok(list), geoPolars: ok(geo), showBoatSpeed: true };
+    }
     case "misalign": {
       const list = [as(pb.misalignIn, "apparentWind")];
       if (cfg.correctForMisalign)     list.push(as(pb.misalignOut, "correctedWind"));
@@ -169,12 +175,6 @@ function _buildScenePolars(stepId, cfg, st) {
     }
     case "groundWind": {
       const list = [as(pb.groundWindIn, "apparentWind"), pb.groundSpeed, pb.groundWind];
-      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
-    }
-    case "outputs": {
-      const list = [pb.trueWind];
-      if (cfg.backCalculateApparentWind) list.push(as(pb.backCalcOut, "correctedWind"));
-      if (cfg.calculateGroundWind)       list.push(pb.groundWind);
       return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
     }
     default:
@@ -251,8 +251,7 @@ const steps = [
   { id: "trueWind",   label: "True Wind" },
   { id: "height",     label: "Height / 10m" },
   { id: "backCalc",   label: "Back Calc AW" },
-  { id: "groundWind", label: "Wind direction" },
-  { id: "outputs",    label: "Outputs" }
+  { id: "groundWind", label: "Wind direction" }
 ];
 
 let currentStepId = "overview";
@@ -375,7 +374,28 @@ const paramMeta = {
   windExponent:              { label: "Wind gradient exponent (α)",              unit: "",   type: "number",  step: 0.01, min: 0.05, max: 0.5, default: 0.14 },
   upwashSlope:               { label: "Upwash slope (α)",                        unit: "",   type: "number",  step: 0.01, min: 0, max: 0.3, default: 0.05 },
   upwashOffset:              { label: "Upwash offset (β)",                       unit: "°",  type: "number",  step: 0.1,  min: -1, max: 4, default: 1.5 },
-  timeConstant:              { label: "Smoothing time constant",                 unit: "s",  type: "number",  step: 0.5,  min: 0, max: 10 },
+  smootherClass:             { label: "Smoother type",                           unit: "",   type: "select",
+    options: [
+      { value: "KalmanSmoother",        label: "Kalman filter" },
+      { value: "ExponentialSmoother",   label: "Exponential (τ)" },
+      { value: "MovingAverageSmoother", label: "Moving Average (window)" },
+      { value: "PassThroughSmoother",   label: "None (pass-through)" }
+    ]
+  },
+  smootherTau:               { label: "Time constant (τ)",                       unit: "s",  type: "number",  step: 0.05, min: 0.05, max: 60, default: 0.45 },
+  smootherTimeSpan:          { label: "Window size",                             unit: "s",  type: "number",  step: 0.05, min: 0.05, max: 60, default: 2 },
+  smootherSteadyState:        { label: "Kalman gain (0 = ignore sensor, 1 = trust fully)", unit: "",   type: "number",  step: 0.05, min: 0.01, max: 0.99, default: 0.2 },
+  attitudeSmootherClass:     { label: "Attitude smoother type",                     unit: "",   type: "select",
+    options: [
+      { value: "MovingAverageSmoother", label: "Moving Average (window)" },
+      { value: "ExponentialSmoother",   label: "Exponential (τ)" },
+      { value: "KalmanSmoother",        label: "Kalman filter" },
+      { value: "PassThroughSmoother",   label: "None (pass-through)" }
+    ]
+  },
+  attitudeSmootherTau:        { label: "Attitude time constant (τ)",                 unit: "s",  type: "number",  step: 0.05, min: 0.05, max: 120, default: 1 },
+  attitudeSmootherTimeSpan:   { label: "Attitude window size",                       unit: "s",  type: "number",  step: 0.05, min: 0.05, max: 120, default: 1 },
+  attitudeSmootherSteadyState: { label: "Attitude Kalman gain",                      unit: "",   type: "number",  step: 0.05, min: 0.01, max: 0.99, default: 0.2 },
   headingSource:             { label: "Heading source",        path: "navigation.headingTrue",              unit: "",   type: "string", sourceOf: { type: "delta",    id: "heading" } },
   attitudeSource:            { label: "Attitude source",       path: "navigation.attitude",                 unit: "",   type: "string", sourceOf: { type: "attitude", id: "attitude" } },
   boatSpeedSource:           { label: "Boat speed source",     path: "navigation.speedThroughWater",        unit: "",   type: "string", sourceOf: { type: "delta", id: "boatSpeed" } },
@@ -423,11 +443,31 @@ const stepConfigs = {
     }
   },
   inputs: {
-    description: "Start of the calculation pipeline. The observed apparent wind enters here.",
+    description: "Start of the calculation pipeline. All incoming Signal K paths are listed here — each can be filtered to a specific source. Raw samples are fed through a smoother before entering the calculations; choose the smoother type and tune its parameters below.",
     correctionFlag: null,
-    parameters: ["windSpeedSource"],
-    inputs:  [
-      { type: "polar", id: "apparentWind" }
+    parameters: [
+      "windSpeedSource",
+      "boatSpeedSource",
+      "headingSource",
+      "attitudeSource",
+      "leewaySource",
+      "rotationPath",
+      "rotationSource",
+      "groundSpeedSource",
+      "smootherClass",
+      { key: "smootherTau",                 showIf: cfg => (cfg.smootherClass || "ExponentialSmoother") === "ExponentialSmoother" },
+      { key: "smootherTimeSpan",            showIf: cfg => (cfg.smootherClass || "ExponentialSmoother") === "MovingAverageSmoother" },
+      { key: "smootherSteadyState",         showIf: cfg => (cfg.smootherClass || "ExponentialSmoother") === "KalmanSmoother" },
+      // PassThroughSmoother has no parameters — nothing extra to show.
+    ],
+    inputs: [
+      { type: "polar",    id: "apparentWind" },
+      { type: "delta",    id: "boatSpeed" },
+      { type: "delta",    id: "heading" },
+      { type: "attitude", id: "attitude" },
+      { type: "delta",    id: "leeway" },
+      { type: "delta",    id: "mast" },
+      { type: "polar",    id: "groundSpeed" },
     ],
     outputs: []
   },
@@ -469,7 +509,14 @@ const stepConfigs = {
   mastMove: {
     description: "Correct for mast movement due to waves.",
     correctionFlag: "correctForMastMovement",
-    parameters: ["heightAboveWater", "attitudeSource"],
+    parameters: [
+      "heightAboveWater",
+      "attitudeSource",
+      "attitudeSmootherClass",
+      { key: "attitudeSmootherTau",         showIf: cfg => (cfg.attitudeSmootherClass || "MovingAverageSmoother") === "ExponentialSmoother" },
+      { key: "attitudeSmootherTimeSpan",    showIf: cfg => (cfg.attitudeSmootherClass || "MovingAverageSmoother") === "MovingAverageSmoother" },
+      { key: "attitudeSmootherSteadyState", showIf: cfg => (cfg.attitudeSmootherClass || "MovingAverageSmoother") === "KalmanSmoother" },
+    ],
     inputs:  [
       { type: "polar",    id: "mastMoveIn" },
       { type: "attitude", id: "attitude" },
@@ -553,27 +600,14 @@ const stepConfigs = {
       { type: "polar", id: "groundWind" }
     ]
   },
-  outputs: {
-    description: "End of the pipeline. Configure which values are written to Signal K.",
-    correctionFlag: null,
-    parameters: [],
-    inputs: (cfg) => {
-      const items = [ { type: "polar", id: "trueWind" } ];
-      if (cfg.backCalculateApparentWind)
-        items.push({ type: "polar", id: "backCalcOut" });
-      if (cfg.calculateGroundWind)
-        items.push({ type: "polar", id: "groundWind" });
-      return items;
-    },
-    outputs: []
-  }
 };
+
 
 // --- Panel rendering helpers ---
 
 function sceneSectionHeading(text) {
-  const h = document.createElement("h3");
-  h.className = "scene-section-heading";
+  const h = document.createElement("h6");
+  h.className = "text-uppercase fw-bold text-muted border-bottom pb-1 mt-3 mb-1 small";
   h.textContent = text;
   return h;
 }
@@ -619,7 +653,7 @@ function formatStateValue(type, data) {
 // Build a 2-column table (Name | Value) for an array of typed descriptors.
 function createDataTable(items) {
   const table = document.createElement("table");
-  table.className = "scene-table";
+  table.className = "table table-sm table-borderless mb-0";
   items.forEach(item => {
     const data = getStateItem(item);
     const row  = table.insertRow();
@@ -638,11 +672,24 @@ function createDataTable(items) {
 function createParamControl(key, meta, value) {
   const container = document.createElement("span");
   if (meta.type === "boolean") {
+    const lbl = document.createElement("label");
+    lbl.className = "switch switch-text switch-primary";
     const cb = document.createElement("input");
     cb.type = "checkbox";
+    cb.className = "switch-input form-check-input";
+    cb.id = "param-cb-" + key;
     cb.checked = !!value;
     cb.onchange = () => updateConfigAtPath(key, cb.checked);
-    container.appendChild(cb);
+    const switchLabel = document.createElement("span");
+    switchLabel.className = "switch-label";
+    switchLabel.setAttribute("data-on", "Yes");
+    switchLabel.setAttribute("data-off", "No");
+    const switchHandle = document.createElement("span");
+    switchHandle.className = "switch-handle";
+    lbl.appendChild(cb);
+    lbl.appendChild(switchLabel);
+    lbl.appendChild(switchHandle);
+    container.appendChild(lbl);
   } else if (meta.type === "number") {
     const inp = document.createElement("input");
     inp.type  = "number";
@@ -650,13 +697,28 @@ function createParamControl(key, meta, value) {
     if (meta.step !== undefined) inp.step = meta.step;
     if (meta.min  !== undefined) inp.min  = meta.min;
     if (meta.max  !== undefined) inp.max  = meta.max;
-    inp.className = "scene-number-input";
+    inp.className = "form-control form-control-sm d-inline-block";
+    inp.style.width = "80px";
     inp.onchange = () => updateConfigAtPath(key, parseFloat(inp.value));
     container.appendChild(inp);
+  } else if (meta.type === "select") {
+    const sel = document.createElement("select");
+    sel.className = "form-select form-select-sm d-inline-block";
+    sel.style.width = "200px";
+    (meta.options || []).forEach(opt => {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.label;
+      sel.appendChild(o);
+    });
+    sel.value = value !== undefined && value !== null ? value : (meta.options && meta.options[0] ? meta.options[0].value : "");
+    sel.onchange = () => updateConfigAtPath(key, sel.value);
+    container.appendChild(sel);
   } else if (meta.sourceOf) {
     // Source selector: build a <select> from the sources array on the state item.
     const sel = document.createElement("select");
-    sel.className = "scene-text-input";
+    sel.className = "form-select form-select-sm d-inline-block";
+    sel.style.width = "180px";
     // Always offer an empty option meaning "any source / no filter".
     const blankOpt = document.createElement("option");
     blankOpt.value = "";
@@ -685,7 +747,8 @@ function createParamControl(key, meta, value) {
     const inp = document.createElement("input");
     inp.type  = "text";
     inp.value = value !== undefined ? value : "";
-    inp.className = "scene-text-input";
+    inp.className = "form-control form-control-sm d-inline-block";
+    inp.style.width = "180px";
     inp.onchange = () => updateConfigAtPath(key, inp.value);
     container.appendChild(inp);
   }
@@ -766,14 +829,26 @@ function renderPanel(step) {
   enableEl.innerHTML = "";
   if (cfg.correctionFlag) {
     const lbl = document.createElement("label");
-    lbl.className = "scene-enable";
-    const cb  = document.createElement("input");
-    cb.type    = "checkbox";
+    lbl.className = "switch switch-text switch-primary";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "switch-input form-check-input";
+    cb.id = "enable-cb-" + step.id;
     cb.checked = !!getConfigValue(cfg.correctionFlag);
     cb.onchange = () => updateConfigAtPath(cfg.correctionFlag, cb.checked);
+    const switchLabel = document.createElement("span");
+    switchLabel.className = "switch-label";
+    switchLabel.setAttribute("data-on", "On");
+    switchLabel.setAttribute("data-off", "Off");
+    const switchHandle = document.createElement("span");
+    switchHandle.className = "switch-handle";
     lbl.appendChild(cb);
-    lbl.appendChild(document.createTextNode(" Enabled"));
-    enableEl.appendChild(lbl);
+    lbl.appendChild(switchLabel);
+    lbl.appendChild(switchHandle);
+    const wrapper = document.createElement("div");
+    wrapper.className = "mb-2";
+    wrapper.appendChild(lbl);
+    enableEl.appendChild(wrapper);
   }
 
   // 4. Settings & Sources — split by param type
@@ -799,7 +874,7 @@ function renderPanel(step) {
 
   function buildParamTable(params) {
     const table = document.createElement("table");
-    table.className = "scene-table";
+    table.className = "table table-sm table-borderless mb-0";
     params.forEach(entry => {
       const key      = typeof entry === "string" ? entry : entry.key;
       const meta     = paramMeta[key] || { label: key, type: "string", unit: "" };
@@ -812,7 +887,7 @@ function renderPanel(step) {
       valCell.appendChild(createParamControl(key, meta, value));
       if (meta.default !== undefined && value !== meta.default) {
         const btn = document.createElement("button");
-        btn.className = "param-reset-btn";
+        btn.className = "btn btn-link btn-sm p-0 ms-1";
         btn.title = `Reset to default (${meta.default})`;
         btn.textContent = "↺";
         btn.onclick = () => updateConfigAtPath(key, meta.default);
@@ -867,9 +942,9 @@ function renderPanelLive(step) {
     // Correction steps: show reasons the correction cannot run.
     const reasons = getCannotActivateReasons(cfg);
     if (reasons.length > 0) {
-      warningsEl.appendChild(sceneSectionHeading("Missing:"));
+      warningsEl.appendChild(sceneSectionHeading("Missing"));
       const list = document.createElement("ul");
-      list.className = "scene-warnings";
+      list.className = "list-unstyled text-danger small ps-3";
       reasons.forEach(r => {
         const li = document.createElement("li");
         li.textContent = r;
@@ -892,7 +967,7 @@ function renderPanelLive(step) {
     if (missing.length > 0) {
       warningsEl.appendChild(sceneSectionHeading("Missing:"));
       const list = document.createElement("ul");
-      list.className = "scene-warnings";
+      list.className = "list-unstyled text-danger small ps-3";
       missing.forEach(r => {
         const li = document.createElement("li");
         li.textContent = r;
@@ -909,14 +984,19 @@ function buildNav() {
   nav.innerHTML = "";
 
   steps.forEach(step => {
-    const item = document.createElement("div");
-    item.className = "nav-item" + (step.id === currentStepId ? " active-step" : "");
-    item.textContent = step.label;
-    item.onclick = () => {
+    const li = document.createElement("li");
+    li.className = "nav-item";
+    const a = document.createElement("a");
+    a.className = "nav-link" + (step.id === currentStepId ? " active" : "");
+    a.href = "#";
+    a.textContent = step.label;
+    a.onclick = (e) => {
+      e.preventDefault();
       currentStepId = step.id;
       renderAll();
     };
-    nav.appendChild(item);
+    li.appendChild(a);
+    nav.appendChild(li);
   });
 }
 

@@ -5,51 +5,110 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Advanced Wind - Insight</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+  <!-- Dynamically inject the SignalK admin UI stylesheet.
+       The filename is hashed by Vite and changes on every SignalK rebuild,
+       so we discover it at runtime by parsing the admin UI root page. -->
+  <script>
+    (async () => {
+      try {
+        const res  = await fetch('/');
+        const html = await res.text();
+        const doc  = new DOMParser().parseFromString(html, 'text/html');
+        const link = doc.querySelector('link[rel="stylesheet"]');
+        if (link) {
+          const el = document.createElement('link');
+          el.rel  = 'stylesheet';
+          el.href = new URL(link.getAttribute('href'), res.url).href;
+          document.head.appendChild(el);
+        }
+      } catch (e) {
+        console.warn('[advancedwind] Could not load SignalK admin stylesheet:', e);
+      }
+    })();
+  </script>
+
+  <!-- Local overrides: SVG vector colours and dark sidebar active state -->
   <link rel="stylesheet" href="main.css">
 </head>
 
-<body>
-  <header class="menu-bar">
-    <div class="menu-brand">
-      <img src="icon.png" alt="Advanced Wind" class="menu-logo">
-      <span class="menu-title">Advanced Wind</span>
+<!-- CoreUI 2.x layout classes — matches the SignalK admin UI body exactly -->
+<body class="app header-fixed sidebar-fixed aside-menu-fixed aside-menu-hidden">
+
+  <header class="app-header navbar navbar-light bg-white">
+    <div class="d-flex align-items-center">
+      <a class="d-flex align-items-center gap-2 me-0 text-decoration-none" href="#">
+        <img src="icon.png" alt="Advanced Wind" style="height:32px;width:auto;">
+        <span class="app-title">Advanced Wind</span>
+      </a>
+      <button class="navbar-toggler sidebar-toggler d-md-down-none ms-2" type="button" id="sidebarToggler">
+        <span class="navbar-toggler-icon"></span>
+      </button>
     </div>
-    <div id="message" class="menu-message"></div>
+    <span id="message" class="text-danger small ms-auto me-3"></span>
   </header>
 
   <div class="app-body">
-    <aside id="insight-nav" class="insight-nav"></aside>
 
-    <main class="content-area">
-      <div class="content-card">
-        <div class="card-subtitle" id="insight-title">Overview</div>
-        <section class="insight-scene">
-          <div class="insight-scene-columns">
-            <div class="insight-scene-canvas">
-              <svg id="insight-canvas" xmlns="http://www.w3.org/2000/svg"
-                   viewBox="-100 -100 200 200"
-                   style="width:100%;aspect-ratio:1/1;display:block;">
-              </svg>
-            </div>
-            <div class="insight-scene-panel">
-              <div id="insight-panel">
-                <p id="panel-description" class="scene-description"></p>
-                <div id="panel-enable"></div>
+    <!-- CoreUI sidebar: minimizer button at bottom collapses it to icon-only -->
+    <div class="sidebar">
+      <nav class="sidebar-nav">
+        <ul id="insight-nav" class="nav"></ul>
+      </nav>
+      <button class="sidebar-minimizer brand-minimizer" type="button" id="sidebarMinimizer"></button>
+    </div>
+
+    <main class="main">
+      <div class="container-fluid pt-3">
+        <div class="card">
+
+          <!-- Card header: step title + enable toggle stacked -->
+          <div class="card-header">
+            <div class="fw-bold text-uppercase" id="insight-title">Overview</div>
+            <div id="panel-enable"></div>
+          </div>
+
+          <!-- Card body: graph left, scene panel right -->
+          <div class="card-body">
+            <div class="row">
+
+              <div class="col-md-5 col-lg-4">
+                <svg id="insight-canvas" xmlns="http://www.w3.org/2000/svg"
+                     viewBox="-100 -100 200 200"
+                     style="width:100%;aspect-ratio:1/1;display:block;">
+                </svg>
+              </div>
+
+              <div class="col-md-7 col-lg-8">
+                <p id="panel-description" class="text-muted small mb-2"></p>
                 <div id="panel-settings"></div>
                 <div id="panel-sources"></div>
                 <div id="panel-inputs"></div>
                 <div id="panel-outputs"></div>
                 <div id="panel-warnings"></div>
               </div>
+
             </div>
           </div>
-        </section>
+
+        </div>
       </div>
     </main>
+
   </div>
+
+  <script>
+    // Sidebar minimizer button (chevron at bottom of sidebar):
+    // toggles sidebar-minimized + brand-minimized on <body> — pure CSS handles the animation.
+    document.getElementById('sidebarMinimizer').addEventListener('click', () => {
+      document.body.classList.toggle('sidebar-minimized');
+      document.body.classList.toggle('brand-minimized');
+    });
+    // Navbar sidebar-toggler (for smaller screens): toggles sidebar-hidden on <body>.
+    document.getElementById('sidebarToggler').addEventListener('click', () => {
+      document.body.classList.toggle('sidebar-hidden');
+    });
+  </script>
 
   <script type="module" src="insight.js"></script>
 </body>

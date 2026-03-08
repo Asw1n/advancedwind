@@ -1,281 +1,98 @@
-/* --- CSS Variables for Colors --- */
+/* --- CSS Variables for SVG vector colours --- */
 :root {
-  /* Signal K UI base colors (extracted from the Signal K admin interface) */
-  --signalk-blue: #003399;          /* brand / logo blue */
-  --signalk-sidebar-bg: #1C2B33;    /* sidebar background (dark blue-grey) */
-  --signalk-sidebar-active: #253D4A;/* sidebar active/hover item */
-  --signalk-sidebar-text: #ffffff;  /* sidebar foreground text & icons */
-  --signalk-amber: #FFB300;         /* activity bar / accent amber */
-  --signalk-green: #43A047;         /* notification badge green */
-  --signalk-page-bg: #F4F6F8;       /* page body background */
-  --signalk-text-primary: #212121;  /* primary content text */
-  --signalk-text-secondary: #546E7A;/* secondary / label text */
-
-  /* Vector colours — matched to SVG element IDs drawn by the graph */
-  --groundWind-color: #1976d262;    /* ground wind */
-
+  --signalk-blue: #003399;
+  --signalk-sidebar-bg: #1C2B33;
+  --signalk-sidebar-active: #253D4A;
+  --signalk-amber: #FFB300;
+  --signalk-green: #43A047;
+  --signalk-text-secondary: #546E7A;
+  --groundWind-color: #1976d262;
 }
 
 /* --- SVG vector colours by element ID --- */
-#groundSpeed {
-  stroke: var(--signalk-sidebar-bg);
-  stroke-width: 1;
-}
-#boatSpeed {
-  stroke: var(--signalk-sidebar-active);
-  stroke-width: 1;
-}
-#apparentWind {
-  stroke: var(--signalk-amber);
-}
-#trueWind {
-  stroke: var(--signalk-blue);
-}
-#groundWind {
-  stroke: var(--groundWind-color);
-}
-#correctedWind {
-  stroke: var(--signalk-green);
-}
+#groundSpeed     { stroke: var(--signalk-sidebar-bg);    stroke-width: 1; }
+#boatSpeed       { stroke: var(--signalk-sidebar-active); stroke-width: 1; }
+#apparentWind    { stroke: var(--signalk-amber); }
+#trueWind        { stroke: var(--signalk-blue); }
+#groundWind      { stroke: var(--groundWind-color); }
+#correctedWind   { stroke: var(--signalk-green); }
 #heelVector,
-#mastMoveVector {
-  stroke: var(--signalk-sidebar-bg);
-  stroke-width: 1;
-}
+#mastMoveVector  { stroke: var(--signalk-sidebar-bg); stroke-width: 1; }
 
-/* --- Table and Cell Styling --- */
-table {
-  border-collapse: collapse;
-}
-th, td {
-  border: 1px solid black;
-  padding: 5px;
-}
-/* .stale rows are flagged in JS but shown only via the warnings text panel, not via background colour */
-
-/* --- SVG Styling --- */
+/* --- SVG canvas --- */
 svg {
   border: 1px solid #ccc;
   height: auto;
   aspect-ratio: 1 / 1;
 }
-line {
-  stroke-width: 2;
-}
+line { stroke-width: 2; }
 #hull, #mast {
   stroke: #003399;
   stroke-width: 1;
   stroke-linecap: round;
 }
 
-/* --- Menu and Layout --- */
-body {
-  font-family: 'Roboto', Arial, sans-serif;
-  margin: 0;
-  padding: 0;
-  background: #E4E5E6;
-  color: #212121;
+/* --- Suppress SignalK brand logo/text injected by CoreUI admin stylesheet ---
+   The compiled CSS adds the SignalK logo as a background-image on .navbar-brand
+   and may add Signal K text via pseudo-elements. We neutralise all of these. */
+.app-header .navbar-brand {
+  background-image: none !important;
+  width: auto !important;
+}
+.app-header .navbar-brand::before,
+.app-header .navbar-brand::after {
+  display: none !important;
+  content: none !important;
 }
 
-/* ---- Top Navigation Bar ---- */
-.menu-bar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 56px;
-  background: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
-  box-sizing: border-box;
-}
-.menu-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.menu-logo {
-  height: auto;
-  width: 56px;
-}
-.menu-title {
-  font-size: 18px;
+/* --- App title styling (replaces .navbar-brand on our own title) --- */
+.app-title {
+  font-size: 1.1rem;
   font-weight: 500;
-  color: #003399;
-  letter-spacing: 0.02em;
-}
-.menu-message {
-  font-size: 13px;
-  color: #c62828;
-  font-weight: 400;
+  color: #29363D;
+  white-space: nowrap;
 }
 
-/* ---- Application Body (sidebar + content) ---- */
-.app-body {
-  display: flex;
-  min-height: calc(100vh - 56px);
-  margin-top: 56px;
-}
-
-/* ---- Left Sidebar Navigation ---- */
-.insight-nav {
-  flex: 0 0 180px;
-  background: #29363D;
-  display: flex;
-  flex-direction: column;
-  padding-top: 8px;
-  min-height: calc(100vh - 56px);
-}
-.insight-nav .nav-item {
-  display: block;
-  padding: 11px 20px;
-  color: #ffffff;
-  font-size: 14px;
-  font-weight: 400;
-  cursor: pointer;
-  border-left: 3px solid transparent;
-  transition: background 0.15s;
-  user-select: none;
-}
-.insight-nav .nav-item:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-.insight-nav .nav-item.active-step {
-  background: #33444C;
-  border-left-color: #00bcd4;
-  color: #ffffff;
-  font-weight: 500;
-}
-
-/* ---- Main Content Area ---- */
-.content-area {
-  flex: 1 1 auto;
-  padding: 24px;
-  overflow: auto;
-}
-
-/* ---- White Content Card ---- */
-.content-card {
-  background: #ffffff;
-  border-radius: 4px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
-  overflow: hidden;
-}
-.card-subtitle {
-  padding: 12px 24px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #212121;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  border-bottom: 1px solid #d0d4d8;
-  background: #F0F3F5;
-}
-
-/* ---- Insight Scene (inside card) ---- */
-.insight-scene {
-  padding: 24px;
-}
-.insight-scene-columns {
-  display: flex;
-  gap: 24px;
-  align-items: flex-start;
-}
-.insight-scene-canvas {
-  flex: 1 1 50%;
-}
-.insight-scene-panel {
-  flex: 1 1 50%;
-}
-
-/* --- Insight scene panel --- */
-.scene-description {
-  margin: 0 0 12px 0;
-  color: #444;
-  font-size: 14px;
-}
-
-.scene-enable {
-  margin-bottom: 12px;
-  font-size: 15px;
-  font-weight: bold;
-}
-
-.scene-enable label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-
-.scene-section-heading {
-  margin: 14px 0 4px 0;
-  font-size: 13px;
-  font-weight: bold;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #555;
-  border-bottom: 1px solid #ccc;
-  padding-bottom: 2px;
-}
-
-.scene-table {
-  border-collapse: collapse;
-  width: 100%;
-  font-size: 13px;
-  margin-bottom: 4px;
-}
-
-.scene-table td,
-.scene-table th {
-  border: none;
-  padding: 3px 6px;
-  vertical-align: middle;
-}
-
-.scene-table tr:nth-child(even) {
-  background-color: #f5f5f5;
-}
-
-.scene-table td:first-child {
-  color: #333;
+/* --- Stable two-column layout for settings, sources, inputs and outputs tables.
+   Label column fixed at 55%; value column takes the rest. Applied to all
+   scene tables regardless of which step is active, so columns never jump. */
+.card-body .table td:first-child {
   width: 55%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-body .table td:last-child {
+  width: 45%;
+}
+.card-body .table {
+  table-layout: fixed;
+  width: 100%;
 }
 
-.scene-table td:last-child {
-  font-family: monospace;
+/* --- Sidebar active nav link accent colour override ---
+   CoreUI's compiled CSS styles .sidebar .nav-link etc;
+   we only override the active left-border accent to match the teal used
+   in the rest of the advancedwind UI. */
+.sidebar .nav-link.active {
+  border-left-color: #00bcd4 !important;
 }
 
-.scene-number-input {
-  width: 80px;
+/* --- Scale down the enable toggle in the card header so it does not
+   increase the header's natural height. Positioned absolutely so it is
+   fully out of layout flow and cannot push the header open. */
+.card-header {
+  position: relative;
 }
-
-.param-reset-btn {
-  margin-left: 4px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--signalk-text-secondary);
-  padding: 0 2px;
-  vertical-align: middle;
-  line-height: 1;
+.card-header #panel-enable {
+  position: absolute;
+  right: 1rem;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
 }
-.param-reset-btn:hover {
-  color: var(--signalk-blue);
-}
-
-.scene-text-input {
-  width: 180px;
-}
-
-.scene-warnings {
-  margin: 4px 0 0 0;
-  padding-left: 20px;
-  color: #c62828;
-  font-size: 13px;
+.card-header #panel-enable > *,
+.card-header #panel-enable .switch {
+  margin: 0;
 }

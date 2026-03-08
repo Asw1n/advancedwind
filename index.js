@@ -1,4 +1,4 @@
-const { Polar, Reporter, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother, MessageSmoother, createSmoothedPolar, createSmoothedHandler } = require('signalkutilities');
+const { Polar, Reporter, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother, PassThroughSmoother, MessageSmoother, createSmoothedPolar, createSmoothedHandler } = require('signalkutilities');
 const path = require('path');
 
 module.exports = function (app) {
@@ -29,7 +29,18 @@ module.exports = function (app) {
     'windExponent': 0.14,
     'upwashSlope': 0.05,
     'upwashOffset': 1.5,
-    'timeConstant': 1,
+
+    // Smoother
+    'smootherClass': 'ExponentialSmoother',
+    'smootherTau': 0.45,
+    'smootherTimeSpan': 2,
+    'smootherSteadyState': 0.2,
+
+    // Attitude smoother (separate — attitude is differentiated to compute sensor speed)
+    'attitudeSmootherClass': 'MovingAverageSmoother',
+    'attitudeSmootherTau': 1,
+    'attitudeSmootherTimeSpan': 1,
+    'attitudeSmootherSteadyState': 0.2,
 
     // Data Sources
     'headingSource': '',
@@ -70,7 +81,7 @@ module.exports = function (app) {
       return;
     }
     else if (temp.version === currentVersion) {
-      options = { ...temp };
+      options = { ...defaultOptions, ...temp };
       return;
     }
   }
@@ -175,6 +186,60 @@ module.exports = function (app) {
     });
 
   }
+
+  function resolveSmootherClass(name) {
+    switch (name) {
+      case 'ExponentialSmoother':   return ExponentialSmoother;
+      case 'MovingAverageSmoother': return MovingAverageSmoother;
+      case 'PassThroughSmoother':   return PassThroughSmoother;
+      case 'KalmanSmoother':
+      default:                      return KalmanSmoother;
+    }
+  }
+
+  function buildSmootherOptions(opts) {
+    switch (opts.smootherClass || 'KalmanSmoother') {
+      case 'ExponentialSmoother': {
+        const tau = Math.max(0.05, opts.smootherTau ?? 1);
+        return { tau };
+      }
+      case 'MovingAverageSmoother': {
+        const timeSpan = Math.max(0.05, opts.smootherTimeSpan ?? 1);
+        return { timeSpan };
+      }
+      case 'PassThroughSmoother':
+        return {};
+      case 'KalmanSmoother':
+      default: {
+        const raw = opts.smootherSteadyState ?? 0.3;
+        const steadyState = Math.min(0.99, Math.max(0.01, raw));
+        return { steadyState };
+      }
+    }
+  }
+
+  function buildAttitudeSmootherOptions(opts) {
+    const cls = opts.attitudeSmootherClass || 'MovingAverageSmoother';
+    switch (cls) {
+      case 'ExponentialSmoother': {
+        const tau = Math.max(0.05, opts.attitudeSmootherTau ?? 1);
+        return { tau };
+      }
+      case 'PassThroughSmoother':
+        return {};
+      case 'KalmanSmoother': {
+        const raw = opts.attitudeSmootherSteadyState ?? 0.2;
+        const steadyState = Math.min(0.99, Math.max(0.01, raw));
+        return { steadyState };
+      }
+      case 'MovingAverageSmoother':
+      default: {
+        const timeSpan = Math.max(0.05, opts.attitudeSmootherTimeSpan ?? 1);
+        return { timeSpan };
+      }
+    }
+  }
+
   plugin.start = () => {
     app.debug("plugin started");
     app.setPluginStatus("Starting");
@@ -184,7 +249,8 @@ module.exports = function (app) {
     readOptions();
     const outputs = [];
     reportFull = new Reporter();
-    let smootherOptions = { timeConstant: options.timeConstant, processVariance: 1, measurementVariance: 4, timeSpan: 1 };
+    let SmootherClass = resolveSmootherClass(options.smootherClass);
+    let smootherOptions = buildSmootherOptions(options);
 
     // heading
     heading = createSmoothedHandler({
@@ -194,8 +260,8 @@ module.exports = function (app) {
       subscribe: true,
       app,
       pluginId: plugin.id,
-      SmootherClass: KalmanSmoother,
-      smootherOptions: smootherOptions,
+      SmootherClass,
+      smootherOptions,
       displayAttributes: { label: "Heading" },
     });
 
@@ -207,8 +273,8 @@ module.exports = function (app) {
       subscribe: true,
       app,
       pluginId: plugin.id,
-      SmootherClass: KalmanSmoother,
-      smootherOptions: smootherOptions,
+      SmootherClass,
+      smootherOptions,
       displayAttributes: { label: "Mast Rotation" },
     });
 
@@ -220,8 +286,8 @@ module.exports = function (app) {
       subscribe: true,
       app,
       pluginId: plugin.id,
-      SmootherClass: MovingAverageSmoother,
-      smootherOptions: {timeSpan: 1},
+      SmootherClass: resolveSmootherClass(options.attitudeSmootherClass),
+      smootherOptions: buildAttitudeSmootherOptions(options),
       displayAttributes: { label: "Attitude" }
     });
     sensorSpeed = new Polar(app, plugin.id, "sensorSpeed");
@@ -231,37 +297,53 @@ module.exports = function (app) {
     // between consecutive attitude updates. This avoids the problem of calculate()
     // firing on every wind delta (often with the same attitude value), which would
     // recompute a near-zero rotation rate and destroy the valid sensorSpeed.
-    {
-      let attLastTime = null;
-      let attPrevious = null;
-      // Minimum interval between derivative computations (ms).
-      // Attitude messages can arrive in bursts only milliseconds apart; dividing
-      // a small angle change by a near-zero deltaT produces huge spurious velocities.
-      // By requiring at least MIN_ATT_INTERVAL ms we accumulate a reliable window:
-      // attPrevious only advances when we actually compute, so the full angular
-      // change since the last accepted sample is always used.
-      const MIN_ATT_INTERVAL = 50;
-      attitude.onChange = () => {
-        const current = attitude.value;
-        if (!current) return;
-        const now = Date.now();
-        if (!attLastTime) {
-          attLastTime = now;
-          attPrevious = { ...current };
-          return;
+    //
+    // attLastTime/attPrevious are declared at plugin.start() scope so applyOptionChanges()
+    // can also reset them when the attitude smoother is reconfigured.
+    let attLastTime = null;
+    let attPrevious = null;
+    // Minimum interval between derivative computations (ms).
+    // Attitude messages can arrive in bursts only milliseconds apart; dividing
+    // a small angle change by a near-zero deltaT produces huge spurious velocities.
+    // By requiring at least MIN_ATT_INTERVAL ms we accumulate a reliable window:
+    // attPrevious only advances when we actually compute, so the full angular
+    // change since the last accepted sample is always used.
+    const MIN_ATT_INTERVAL = 50;
+    // Keys that trigger an attitude smoother reset.
+    const ATTITUDE_SMOOTHER_KEYS = ['attitudeSmootherClass', 'attitudeSmootherTau', 'attitudeSmootherTimeSpan', 'attitudeSmootherSteadyState'];
+    attitude.onChange = () => {
+      // Apply attitude smoother settings eagerly — don't wait for calculate() (wind data).
+      // Also resets derivative state to avoid a spike from the smoother discontinuity.
+      if (ATTITUDE_SMOOTHER_KEYS.some(k => k in changedOptions)) {
+        for (const k of ATTITUDE_SMOOTHER_KEYS) {
+          if (k in changedOptions) { options[k] = changedOptions[k]; delete changedOptions[k]; }
         }
-        const deltaT = (now - attLastTime) / 1000;
-        // Skip samples that arrive too close together — wait for the window to grow.
-        if (deltaT < MIN_ATT_INTERVAL / 1000) return;
+        attitude.setSmootherOptions(buildAttitudeSmootherOptions(options));
+        attitude.setSmootherClass(resolveSmootherClass(options.attitudeSmootherClass));
+        saveOptions();
+        attLastTime = null;
+        attPrevious = null;
+        return;  // skip derivative computation this cycle
+      }
+      const current = attitude.value;
+      if (!current) return;
+      const now = Date.now();
+      if (!attLastTime) {
         attLastTime = now;
-        const r = options.heightAboveWater;
-        sensorSpeed.setVectorValue({
-          x: ((current.pitch - attPrevious.pitch) / deltaT) * r,
-          y: ((current.roll  - attPrevious.roll)  / deltaT) * r
-        });
         attPrevious = { ...current };
-      };
-    }
+        return;
+      }
+      const deltaT = (now - attLastTime) / 1000;
+      // Skip samples that arrive too close together — wait for the window to grow.
+      if (deltaT < MIN_ATT_INTERVAL / 1000) return;
+      attLastTime = now;
+      const r = options.heightAboveWater;
+      sensorSpeed.setVectorValue({
+        x: ((current.pitch - attPrevious.pitch) / deltaT) * r,
+        y: ((current.roll  - attPrevious.roll)  / deltaT) * r
+      });
+      attPrevious = { ...current };
+    };
 
     // Snapshot polars for per-step before/after inspection
     misalignIn  = new Polar(app, plugin.id, "misalignIn");  misalignIn.setDisplayAttributes({  label: "Before misalignment",      plane: "Boat" });
@@ -304,8 +386,8 @@ module.exports = function (app) {
       sourceAngle: options.windSpeedSource,
       app: app,
       pluginId: plugin.id,
-      SmootherClass: KalmanSmoother,
-      smootherOptions: smootherOptions,
+      SmootherClass,
+      smootherOptions,
       displayAttributes: { label: "Apparent Wind", plane: "Boat" },
       passOn: !options.preventDuplication,
     });
@@ -321,8 +403,8 @@ module.exports = function (app) {
       subscribe: true,
       app,
       pluginId: plugin.id,
-      SmootherClass: KalmanSmoother,
-      smootherOptions: smootherOptions,
+      SmootherClass,
+      smootherOptions,
       displayAttributes: { label: "Boat Speed", unit: "m/s" },
     });
 
@@ -333,8 +415,8 @@ module.exports = function (app) {
       subscribe: true,
       app,
       pluginId: plugin.id,
-      SmootherClass: KalmanSmoother,
-      smootherOptions: smootherOptions,
+      SmootherClass,
+      smootherOptions,
       displayAttributes: { label: "Leeway Angle", unit: "rad" },
     });
 
@@ -344,8 +426,8 @@ module.exports = function (app) {
 
     // ground wind and ground speed (always created; options decide whether used/output)
     groundWind = new Polar(app, plugin.id, "groundWind");
-    groundWind.setMagnitudeSubscription("environment.wind.speedOverGround");
-    groundWind.setAngleSubscription("environment.wind.directionTrue");
+    groundWind.configureMagnitude("environment.wind.speedOverGround");
+    groundWind.configureAngle("environment.wind.directionTrue");
     groundWind.setAngleRange('0to2pi');
     groundWind.setDisplayAttributes({ label: "Ground Wind", plane: "Ground" });
 
@@ -358,8 +440,8 @@ module.exports = function (app) {
       sourceAngle: options.groundSpeedSource,
       app,
       pluginId: plugin.id,
-      SmootherClass: KalmanSmoother,
-      smootherOptions: smootherOptions,
+      SmootherClass,
+      smootherOptions,
       displayAttributes: { label: "Ground Speed", plane: "Ground" },
       passOn: true,
       angleRange: '0to2pi'
@@ -367,15 +449,15 @@ module.exports = function (app) {
 
     // calculated wind
     calculatedWind = new Polar(app, plugin.id, "calculatedWind");
-    calculatedWind.setMagnitudeSubscription("environment.wind.speedApparent");
-    calculatedWind.setAngleSubscription("environment.wind.angleApparent");
+    calculatedWind.configureMagnitude("environment.wind.speedApparent");
+    calculatedWind.configureAngle("environment.wind.angleApparent");
     calculatedWind.setDisplayAttributes({ label: "Apparent Wind", plane: "Boat" });
     calculatedWind.angleRange = '-piToPi';
 
     //true wind
     trueWind = new Polar(app, plugin.id, "trueWind");
-    trueWind.setMagnitudeSubscription("environment.wind.speedTrue");
-    trueWind.setAngleSubscription("environment.wind.angleTrueWater");
+    trueWind.configureMagnitude("environment.wind.speedTrue");
+    trueWind.configureAngle("environment.wind.angleTrueWater");
     trueWind.setDisplayAttributes({ label: "True Wind", plane: "Boat" });
     trueWind.angleRange = '-piToPi';
 
@@ -528,6 +610,7 @@ module.exports = function (app) {
     }
 
     function applyOptionChanges() {
+      let needsSmootherReset = false;
       // Pop each key-value pair from changedOptions
       for (const key of Object.keys(changedOptions)) {
         const value = changedOptions[key];
@@ -563,9 +646,44 @@ module.exports = function (app) {
             apparentWind.polar.magnitudeHandler.passOn = !value;
             apparentWind.polar.angleHandler.passOn = !value;
             break;
+          case 'smootherClass':
+          case 'smootherTau':
+          case 'smootherTimeSpan':
+          case 'smootherSteadyState':
+            // Handled in bulk after the loop — just accumulate into options.
+            needsSmootherReset = true;
+            break;
+          case 'attitudeSmootherClass':
+          case 'attitudeSmootherTau':
+          case 'attitudeSmootherTimeSpan':
+          case 'attitudeSmootherSteadyState':
+            needsSmootherReset = true;
+            break;
         }
         delete changedOptions[key];
       }
+
+      // Apply smoother changes in one pass so class and options are consistent.
+      if (needsSmootherReset) {
+        const NewSmootherClass = resolveSmootherClass(options.smootherClass);
+        const newSmootherOptions = buildSmootherOptions(options);
+        // Set options first so setSmootherClass picks them up if it reuses current options.
+        [heading, mast, boatSpeedHandler, leewayHandler].forEach(h => {
+          if (h) { h.setSmootherOptions(newSmootherOptions); h.setSmootherClass(NewSmootherClass); }
+        });
+        [apparentWind, groundSpeed].forEach(p => {
+          if (p) { p.setSmootherOptions(newSmootherOptions); p.setSmootherClass(NewSmootherClass); }
+        });
+        // Attitude has its own smoother settings.
+        // Also reset derivative state so the discontinuity does not produce a spike.
+        if (attitude) {
+          attitude.setSmootherOptions(buildAttitudeSmootherOptions(options));
+          attitude.setSmootherClass(resolveSmootherClass(options.attitudeSmootherClass));
+          attLastTime = null;
+          attPrevious = null;
+        }
+      }
+
       saveOptions();
     }
   }
