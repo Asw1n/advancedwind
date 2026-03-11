@@ -143,16 +143,44 @@ module.exports = function (app) {
     readOptions();
 
 
-    // Endpoint for full Reporter-based state snapshot
+    // Static metadata — serve once at webapp load
+    router.get('/meta', (req, res) => {
+      if (!isRunning || !reportFull) {
+        res.status(503).json({ error: "Plugin is not running" });
+      } else {
+        try {
+          res.json(reportFull.meta());
+        } catch (err) {
+          app.error(`AdvancedWind /meta error: ${err.message}`);
+          res.status(500).json({ error: "Failed to build meta" });
+        }
+      }
+    });
+
+    // Dynamic staleness — cheap poll (e.g. every 2 s)
     router.get('/state', (req, res) => {
+      if (!isRunning || !reportFull) {
+        res.status(503).json({ error: "Plugin is not running" });
+      } else {
+        try {
+          res.json(reportFull.state());
+        } catch (err) {
+          app.error(`AdvancedWind /state error: ${err.message}`);
+          res.status(500).json({ error: "Failed to build state" });
+        }
+      }
+    });
+
+    // Full live report — frequent poll / SSE
+    router.get('/report', (req, res) => {
       if (!isRunning || !reportFull) {
         res.status(503).json({ error: "Plugin is not running" });
       } else {
         try {
           res.json(reportFull.report());
         } catch (err) {
-          app.error(`AdvancedWind /state error: ${err.message}`);
-          res.status(500).json({ error: "Failed to build state report" });
+          app.error(`AdvancedWind /report error: ${err.message}`);
+          res.status(500).json({ error: "Failed to build report" });
         }
       }
     });
@@ -262,7 +290,6 @@ module.exports = function (app) {
       pluginId: plugin.id,
       SmootherClass,
       smootherOptions,
-      displayAttributes: { label: "Heading" },
     });
 
     //mast rotation (always create handler; options decide whether it is used)
@@ -275,7 +302,6 @@ module.exports = function (app) {
       pluginId: plugin.id,
       SmootherClass,
       smootherOptions,
-      displayAttributes: { label: "Mast Rotation" },
     });
 
     //attitude (always create handler; corrections decide whether it is used)
@@ -288,10 +314,9 @@ module.exports = function (app) {
       pluginId: plugin.id,
       SmootherClass: resolveSmootherClass(options.attitudeSmootherClass),
       smootherOptions: buildAttitudeSmootherOptions(options),
-      displayAttributes: { label: "Attitude" }
     });
     sensorSpeed = new Polar(app, plugin.id, "sensorSpeed");
-    sensorSpeed.setDisplayAttributes({ label: "Speed of sensor", plane: "Boat" });
+    sensorSpeed.setMeta({ displayName: "Speed of sensor", plane: "Boat" });
 
     // Compute sensorSpeed exactly once per attitude sample, using the correct deltaT
     // between consecutive attitude updates. This avoids the problem of calculate()
@@ -346,23 +371,38 @@ module.exports = function (app) {
     };
 
     // Snapshot polars for per-step before/after inspection
-    misalignIn  = new Polar(app, plugin.id, "misalignIn");  misalignIn.setDisplayAttributes({  label: "Before misalignment",      plane: "Boat" });
-    misalignOut = new Polar(app, plugin.id, "misalignOut"); misalignOut.setDisplayAttributes({ label: "After misalignment",       plane: "Boat" });
-    mastRotIn   = new Polar(app, plugin.id, "mastRotIn");   mastRotIn.setDisplayAttributes({   label: "Before mast rotation",     plane: "Boat" });
-    mastRotOut  = new Polar(app, plugin.id, "mastRotOut");  mastRotOut.setDisplayAttributes({  label: "After mast rotation",      plane: "Boat" });
-    mastHeelIn  = new Polar(app, plugin.id, "mastHeelIn");  mastHeelIn.setDisplayAttributes({  label: "Before mast heel",         plane: "Boat" });
-    mastHeelOut = new Polar(app, plugin.id, "mastHeelOut"); mastHeelOut.setDisplayAttributes({ label: "After mast heel",          plane: "Boat" });
-    mastMoveIn  = new Polar(app, plugin.id, "mastMoveIn");  mastMoveIn.setDisplayAttributes({  label: "Before mast movement",     plane: "Boat" });
-    mastMoveOut = new Polar(app, plugin.id, "mastMoveOut"); mastMoveOut.setDisplayAttributes({ label: "After mast movement",      plane: "Boat" });
-    upwashIn    = new Polar(app, plugin.id, "upwashIn");    upwashIn.setDisplayAttributes({    label: "Before upwash",            plane: "Boat" });
-    upwashOut   = new Polar(app, plugin.id, "upwashOut");   upwashOut.setDisplayAttributes({   label: "After upwash",             plane: "Boat" });
-    leewayIn    = new Polar(app, plugin.id, "leewayIn");    leewayIn.setDisplayAttributes({    label: "Before leeway",            plane: "Boat" });
-    leewayOut   = new Polar(app, plugin.id, "leewayOut");   leewayOut.setDisplayAttributes({   label: "After leeway",             plane: "Boat" });
-    trueWindIn  = new Polar(app, plugin.id, "trueWindIn");  trueWindIn.setDisplayAttributes({  label: "Corrected apparent wind",  plane: "Boat" });
-    heightIn    = new Polar(app, plugin.id, "heightIn");    heightIn.setDisplayAttributes({    label: "True wind (before height norm.)", plane: "Boat" });
-    heightOut   = new Polar(app, plugin.id, "heightOut");   heightOut.setDisplayAttributes({   label: "True wind (after height norm.)",  plane: "Boat" });
-    backCalcOut = new Polar(app, plugin.id, "backCalcOut"); backCalcOut.setDisplayAttributes({ label: "Corrected apparent wind",  plane: "Boat" });
-    groundWindIn = new Polar(app, plugin.id, "groundWindIn"); groundWindIn.setDisplayAttributes({ label: "Corrected apparent wind", plane: "Boat" });
+    misalignIn  = new Polar(app, plugin.id, "misalignIn");  misalignIn.setMeta({  displayName: "Before misalignment",      plane: "Boat" });
+    misalignOut = new Polar(app, plugin.id, "misalignOut"); misalignOut.setMeta({ displayName: "After misalignment",       plane: "Boat" });
+    mastRotIn   = new Polar(app, plugin.id, "mastRotIn");   mastRotIn.setMeta({   displayName: "Before mast rotation",     plane: "Boat" });
+    mastRotOut  = new Polar(app, plugin.id, "mastRotOut");  mastRotOut.setMeta({  displayName: "After mast rotation",      plane: "Boat" });
+    mastHeelIn  = new Polar(app, plugin.id, "mastHeelIn");  mastHeelIn.setMeta({  displayName: "Before mast heel",         plane: "Boat" });
+    mastHeelOut = new Polar(app, plugin.id, "mastHeelOut"); mastHeelOut.setMeta({ displayName: "After mast heel",          plane: "Boat" });
+    mastMoveIn  = new Polar(app, plugin.id, "mastMoveIn");  mastMoveIn.setMeta({  displayName: "Before mast movement",     plane: "Boat" });
+    mastMoveOut = new Polar(app, plugin.id, "mastMoveOut"); mastMoveOut.setMeta({ displayName: "After mast movement",      plane: "Boat" });
+    upwashIn    = new Polar(app, plugin.id, "upwashIn");    upwashIn.setMeta({    displayName: "Before upwash",            plane: "Boat" });
+    upwashOut   = new Polar(app, plugin.id, "upwashOut");   upwashOut.setMeta({   displayName: "After upwash",             plane: "Boat" });
+    leewayIn    = new Polar(app, plugin.id, "leewayIn");    leewayIn.setMeta({    displayName: "Before leeway",            plane: "Boat" });
+    leewayOut   = new Polar(app, plugin.id, "leewayOut");   leewayOut.setMeta({   displayName: "After leeway",             plane: "Boat" });
+    trueWindIn  = new Polar(app, plugin.id, "trueWindIn");  trueWindIn.setMeta({  displayName: "Corrected apparent wind",  plane: "Boat" });
+    heightIn    = new Polar(app, plugin.id, "heightIn");    heightIn.setMeta({    displayName: "True wind (before height norm.)", plane: "Boat" });
+    heightOut   = new Polar(app, plugin.id, "heightOut");   heightOut.setMeta({   displayName: "True wind (after height norm.)",  plane: "Boat" });
+    backCalcOut = new Polar(app, plugin.id, "backCalcOut"); backCalcOut.setMeta({ displayName: "Corrected apparent wind",  plane: "Boat" });
+    groundWindIn = new Polar(app, plugin.id, "groundWindIn"); groundWindIn.setMeta({ displayName: "Corrected apparent wind", plane: "Boat" });
+
+    // Configure SK paths for intermediate polars so the webapp can read unit
+    // metadata (units, displayUnits) from SK for correct value formatting.
+    // These polars are never subscribed — paths are metadata-only references.
+    for (const p of [misalignIn, misalignOut, mastRotIn, mastRotOut, mastHeelIn, mastHeelOut,
+                     mastMoveIn, mastMoveOut, upwashIn, upwashOut, leewayIn, leewayOut,
+                     trueWindIn, backCalcOut, groundWindIn]) {
+      p.configureMagnitude("environment.wind.speedApparent", "", false);
+      p.configureAngle("environment.wind.angleApparent", "", false);
+    }
+    for (const p of [heightIn, heightOut]) {
+      p.configureMagnitude("environment.wind.speedTrue", "", false);
+      p.configureAngle("environment.wind.angleTrueWater", "", false);
+    }
+
     // Scalar delta for the computed upwash correction angle (radians).
     // Always computed each cycle (even when correction is disabled) so the
     // UI can display the would-be correction regardless of the toggle state.
@@ -370,9 +410,10 @@ module.exports = function (app) {
       id: "upwashAngle",
       value: null,
       stale: true,
-      displayAttributes: { label: "Calculated upwash", unit: "rad" },
+      meta: { displayName: "Calculated upwash", units: "rad" },
+      get state() { return { stale: this.stale, frequency: null, sources: [] }; },
       report() {
-        return { id: this.id, value: this.value, stale: this.stale, displayAttributes: this.displayAttributes };
+        return { id: this.id, value: this.value, state: this.state };
       }
     };
 
@@ -388,7 +429,7 @@ module.exports = function (app) {
       pluginId: plugin.id,
       SmootherClass,
       smootherOptions,
-      displayAttributes: { label: "Apparent Wind", plane: "Boat" },
+      meta: { displayName: "Apparent Wind", plane: "Boat" },
       passOn: !options.preventDuplication,
     });
 
@@ -405,7 +446,6 @@ module.exports = function (app) {
       pluginId: plugin.id,
       SmootherClass,
       smootherOptions,
-      displayAttributes: { label: "Boat Speed", unit: "m/s" },
     });
 
     leewayHandler = createSmoothedHandler({
@@ -417,19 +457,18 @@ module.exports = function (app) {
       pluginId: plugin.id,
       SmootherClass,
       smootherOptions,
-      displayAttributes: { label: "Leeway Angle", unit: "rad" },
     });
 
     // Forward-only polar: angle is always 0. Updated each cycle from boatSpeedHandler.
     boatSpeed = new Polar(app, plugin.id, "boatSpeed");
-    boatSpeed.setDisplayAttributes({ label: "Boat Speed", plane: "Boat" });
+    boatSpeed.setMeta({ displayName: "Boat Speed", plane: "Boat" });
 
     // ground wind and ground speed (always created; options decide whether used/output)
     groundWind = new Polar(app, plugin.id, "groundWind");
     groundWind.configureMagnitude("environment.wind.speedOverGround");
     groundWind.configureAngle("environment.wind.directionTrue");
     groundWind.setAngleRange('0to2pi');
-    groundWind.setDisplayAttributes({ label: "Ground Wind", plane: "Ground" });
+    groundWind.setMeta({ displayName: "Ground Wind", plane: "Ground" });
 
     groundSpeed = createSmoothedPolar({
       id: "groundSpeed",
@@ -442,7 +481,7 @@ module.exports = function (app) {
       pluginId: plugin.id,
       SmootherClass,
       smootherOptions,
-      displayAttributes: { label: "Ground Speed", plane: "Ground" },
+      meta: { displayName: "Ground Speed", plane: "Ground" },
       passOn: true,
       angleRange: '0to2pi'
     });
@@ -451,14 +490,14 @@ module.exports = function (app) {
     calculatedWind = new Polar(app, plugin.id, "calculatedWind");
     calculatedWind.configureMagnitude("environment.wind.speedApparent");
     calculatedWind.configureAngle("environment.wind.angleApparent");
-    calculatedWind.setDisplayAttributes({ label: "Apparent Wind", plane: "Boat" });
+    calculatedWind.setMeta({ displayName: "Apparent Wind", plane: "Boat" });
     calculatedWind.angleRange = '-piToPi';
 
     //true wind
     trueWind = new Polar(app, plugin.id, "trueWind");
     trueWind.configureMagnitude("environment.wind.speedTrue");
     trueWind.configureAngle("environment.wind.angleTrueWater");
-    trueWind.setDisplayAttributes({ label: "True Wind", plane: "Boat" });
+    trueWind.setMeta({ displayName: "True Wind", plane: "Boat" });
     trueWind.angleRange = '-piToPi';
 
     //# endregion initialization of paths

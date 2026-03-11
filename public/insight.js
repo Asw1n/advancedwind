@@ -1,5 +1,33 @@
 const API_BASE_URL = "/plugins/advancedwind";
 
+// Static metadata fetched once at startup — flat lookup keyed by item id.
+let meta = {};
+
+// reporter.meta() returns { polars: { id: {id, displayName, ...}, ... }, deltas: {...}, ... }
+// Flatten all categories into a single id-keyed object for easy lookup.
+function normaliseMeta(data) {
+  const byId = {};
+  for (const category of Object.values(data)) {
+    if (category && typeof category === "object" && !Array.isArray(category)) {
+      Object.assign(byId, category);
+    }
+  }
+  return byId;
+}
+
+async function loadMeta() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/meta`);
+    if (res.ok) {
+      meta = normaliseMeta(await res.json());
+    } else {
+      console.error("Failed to fetch meta", res.status, res.statusText);
+    }
+  } catch (err) {
+    console.error("Error fetching meta", err);
+  }
+}
+
 // SVG-based boat graphic (mirrors vectors.js approach)
 let svgCanvas = null;
 
@@ -66,7 +94,7 @@ function _drawVectors(svg, polars, heading, scale) {
       vector.setAttribute("stroke-dashoffset", "1");
     }
 
-    const plane = polar.displayAttributes && polar.displayAttributes.plane;
+    const plane = polar.plane ?? meta[polar.id]?.plane;
     vector.setAttribute("transform",
       plane === "Ground" ? "rotate(-90)" : `rotate(${heading - 90})`);
 
@@ -88,7 +116,7 @@ function _buildScenePolars(stepId, cfg, st) {
   // mastMoveVector: sensor velocity (m/s) scaled to SVG units via mast height.
   const mastH = (cfg && cfg.heightAboveWater) || 18;
   const svgPerMetre = 112.5 / mastH;
-  const attObj = st.attitudesById["attitude"];
+  const attObj = st.attitudesById["attitude.smoothed"];
   const roll  = attObj && attObj.value ? (attObj.value.roll  || 0) : 0;
   const pitch = attObj && attObj.value ? (attObj.value.pitch || 0) : 0;
 
@@ -97,18 +125,18 @@ function _buildScenePolars(stepId, cfg, st) {
       const list = [];
       // Suppress apparentWind when back-calc replaces it in SK.
       if (!(cfg.backCalculateApparentWind && cfg.preventDuplication))
-        list.push(pb.apparentWind);
+        list.push(as(pb["apparentWind.smoothed"], "apparentWind"));
       list.push(pb.trueWind);
       if (cfg.backCalculateApparentWind) list.push(as(pb.backCalcOut, "correctedWind"));
       if (cfg.calculateGroundWind)       list.push(pb.groundWind);
       return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
     }
     case "inputs": {
-      const list = [pb.apparentWind];
-      if (cfg.calculateGroundWind) list.push(pb.groundSpeed);
+      const list = [as(pb["apparentWind.smoothed"], "apparentWind")];
+      if (cfg.calculateGroundWind) list.push(as(pb["groundSpeed.smoothed"], "groundSpeed"));
       const geo = [];
       geo.push({ id: "heelVector", x: Math.sin(pitch) * 112.5, y: Math.sin(roll) * 112.5,
-                 solid: true, displayAttributes: { plane: "Boat" } });
+                 solid: true, plane: "Boat" });
       return { polars: ok(list), geoPolars: ok(geo), showBoatSpeed: true };
     }
     case "misalign": {
@@ -129,7 +157,7 @@ function _buildScenePolars(stepId, cfg, st) {
         // Geometry-based: mast tip displacement from roll (lateral) and pitch (fore-aft).
         // x = sin(pitch)×112.5, y = sin(roll)×112.5 SVG units (mast height cancels).
         geo.push({ id: "heelVector", x: Math.sin(pitch) * 112.5, y: Math.sin(roll) * 112.5,
-                   solid: true, displayAttributes: { plane: "Boat" } });
+                   solid: true, plane: "Boat" });
       }
       return { polars: ok(list), geoPolars: ok(geo), showBoatSpeed: false };
     }
@@ -143,7 +171,7 @@ function _buildScenePolars(stepId, cfg, st) {
           geo.push({ id: "mastMoveVector",
                      x: (pb.sensorSpeed.x || 0) * svgPerMetre,
                      y: (pb.sensorSpeed.y || 0) * svgPerMetre,
-                     solid: true, displayAttributes: { plane: "Boat" } });
+                     solid: true, plane: "Boat" });
         }
       }
       return { polars: ok(list), geoPolars: ok(geo), showBoatSpeed: false };
@@ -174,11 +202,11 @@ function _buildScenePolars(stepId, cfg, st) {
       return { polars: ok(list), geoPolars: [], showBoatSpeed: true };
     }
     case "groundWind": {
-      const list = [as(pb.groundWindIn, "apparentWind"), pb.groundSpeed, pb.groundWind];
+      const list = [as(pb.groundWindIn, "apparentWind"), as(pb["groundSpeed.smoothed"], "groundSpeed"), pb.groundWind];
       return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
     }
     default:
-      return { polars: ok([pb.apparentWind, pb.trueWind]), geoPolars: [], showBoatSpeed: false };
+      return { polars: ok([pb["apparentWind.smoothed"], pb.trueWind]), geoPolars: [], showBoatSpeed: false };
   }
 }
 
@@ -188,13 +216,13 @@ function renderSVG() {
   svg.innerHTML = "";
 
   const cfg = config || {};
-  const headingDelta = state.deltasById["heading"];
+  const headingDelta = state.deltasById["heading.smoothed"];
   const heading = headingDelta ? headingDelta.value * 180 / Math.PI : 0;
 
   const { polars, geoPolars, showBoatSpeed } = _buildScenePolars(currentStepId, cfg, state);
 
   // boatSpeed: include in scale even when drawn separately.
-  const boatSpeedDelta = state.deltasById["boatSpeed"];
+  const boatSpeedDelta = state.deltasById["boatSpeed.smoothed"];
   const boatSpeedVal   = showBoatSpeed && boatSpeedDelta ? (boatSpeedDelta.value || 0) : 0;
 
   // Wind polars drive the auto-scale; geometry polars (heelVector, mastMoveVector)
@@ -263,9 +291,9 @@ function setMessage(text) {
   }
 }
 
-async function fetchState() {
+async function fetchReport() {
   try {
-    const response = await fetch(`${API_BASE_URL}/state`, {
+    const response = await fetch(`${API_BASE_URL}/report`, {
       method: "GET",
       headers: { "Content-Type": "application/json" }
     });
@@ -276,7 +304,7 @@ async function fetchState() {
       } else if (response.status === 401) {
         setMessage("You are not logged on to the server. Log on to the server.");
       } else {
-        setMessage(`Failed to fetch state: ${response.status} ${response.statusText}`);
+        setMessage(`Failed to fetch report: ${response.status} ${response.statusText}`);
       }
       return null;
     }
@@ -286,7 +314,7 @@ async function fetchState() {
     return data;
   } catch (err) {
     console.error(err);
-    setMessage(`Error fetching state: ${err.message}`);
+    setMessage(`Error fetching report: ${err.message}`);
     return null;
   }
 }
@@ -336,26 +364,14 @@ async function updateConfigAtPath(key, value) {
   }
 }
 
+// reporter.report() returns { polars: { id: {id, value/magnitude/angle, state, ...}, ... }, deltas: {...}, ... }
 function normaliseState(data) {
-  const polarsById = {};
-  const deltasById = {};
-  const attitudesById = {};
-  const tablesById = {};
-
-  (data.polars || []).forEach(p => {
-    if (p && p.id) polarsById[p.id] = p;
-  });
-  (data.deltas || []).forEach(d => {
-    if (d && d.id) deltasById[d.id] = d;
-  });
-  (data.attitudes || []).forEach(a => {
-    if (a && a.id) attitudesById[a.id] = a;
-  });
-  (data.tables || []).forEach(t => {
-    if (t && t.id) tablesById[t.id] = t;
-  });
-
-  state = { polarsById, deltasById, attitudesById, tablesById };
+  state = {
+    polarsById:    data.polars    || {},
+    deltasById:    data.deltas    || {},
+    attitudesById: data.attitudes || {},
+    tablesById:    data.tables    || {},
+  };
 }
 
 // --- Config helpers ---
@@ -396,14 +412,14 @@ const paramMeta = {
   attitudeSmootherTau:        { label: "Attitude time constant (τ)",                 unit: "s",  type: "number",  step: 0.05, min: 0.05, max: 120, default: 1 },
   attitudeSmootherTimeSpan:   { label: "Attitude window size",                       unit: "s",  type: "number",  step: 0.05, min: 0.05, max: 120, default: 1 },
   attitudeSmootherSteadyState: { label: "Attitude Kalman gain",                      unit: "",   type: "number",  step: 0.05, min: 0.01, max: 0.99, default: 0.2 },
-  headingSource:             { label: "Heading source",        path: "navigation.headingTrue",              unit: "",   type: "string", sourceOf: { type: "delta",    id: "heading" } },
-  attitudeSource:            { label: "Attitude source",       path: "navigation.attitude",                 unit: "",   type: "string", sourceOf: { type: "attitude", id: "attitude" } },
-  boatSpeedSource:           { label: "Boat speed source",     path: "navigation.speedThroughWater",        unit: "",   type: "string", sourceOf: { type: "delta", id: "boatSpeed" } },
-  leewaySource:              { label: "Leeway angle source",   path: "navigation.leewayAngle",              unit: "",   type: "string", sourceOf: { type: "delta", id: "leeway" } },
-  windSpeedSource:           { label: "Wind speed source",     path: "environment.wind.speedApparent",      unit: "",   type: "string", sourceOf: { type: "polar",    id: "apparentWind" } },
+  headingSource:             { label: "Heading source",        path: "navigation.headingTrue",              unit: "",   type: "string", sourceOf: { type: "delta",    id: "heading.smoothed" } },
+  attitudeSource:            { label: "Attitude source",       path: "navigation.attitude",                 unit: "",   type: "string", sourceOf: { type: "attitude", id: "attitude.smoothed" } },
+  boatSpeedSource:           { label: "Boat speed source",     path: "navigation.speedThroughWater",        unit: "",   type: "string", sourceOf: { type: "delta", id: "boatSpeed.smoothed" } },
+  leewaySource:              { label: "Leeway angle source",   path: "navigation.leewayAngle",              unit: "",   type: "string", sourceOf: { type: "delta", id: "leeway.smoothed" } },
+  windSpeedSource:           { label: "Wind speed source",     path: "environment.wind.speedApparent",      unit: "",   type: "string", sourceOf: { type: "polar",    id: "apparentWind.smoothed" } },
   rotationPath:              { label: "Mast rotation path",                                                 unit: "",   type: "string" },
-  rotationSource:            { label: "Mast rotation source",  path: "(see rotation path above)",          unit: "",   type: "string", sourceOf: { type: "delta",    id: "mast" } },
-  groundSpeedSource:         { label: "Ground speed source",   path: "navigation.speedOverGround",          unit: "",   type: "string", sourceOf: { type: "polar",    id: "groundSpeed" } },
+  rotationSource:            { label: "Mast rotation source",  path: "(see rotation path above)",          unit: "",   type: "string", sourceOf: { type: "delta",    id: "mast.smoothed" } },
+  groundSpeedSource:         { label: "Ground speed source",   path: "navigation.speedOverGround",          unit: "",   type: "string", sourceOf: { type: "polar",    id: "groundSpeed.smoothed" } },
   calculateGroundWind:       { label: "Calculate Wind direction",                   unit: "",   type: "boolean" },
   backCalculateApparentWind: { label: "Back-calculate apparent wind",            unit: "",   type: "boolean" },
   preventDuplication:        { label: "Replace apparent wind (prevent duplication)", unit: "", type: "boolean" }
@@ -422,14 +438,14 @@ const stepConfigs = {
     parameters: [],
     inputs: (cfg) => {
       const items = [
-        { type: "polar", id: "apparentWind" },
-        { type: "delta", id: "boatSpeed" }
+        { type: "polar", id: "apparentWind.smoothed" },
+        { type: "delta", id: "boatSpeed.smoothed" }
       ];
       if (cfg.correctForMastHeel || cfg.correctForMastMovement)
-        items.push({ type: "attitude", id: "attitude" });
+        items.push({ type: "attitude", id: "attitude.smoothed" });
       if (cfg.calculateGroundWind) {
-        items.push({ type: "delta",  id: "heading" });
-        items.push({ type: "polar", id: "groundSpeed" });
+        items.push({ type: "delta",  id: "heading.smoothed" });
+        items.push({ type: "polar", id: "groundSpeed.smoothed" });
       }
       return items;
     },
@@ -461,13 +477,13 @@ const stepConfigs = {
       // PassThroughSmoother has no parameters — nothing extra to show.
     ],
     inputs: [
-      { type: "polar",    id: "apparentWind" },
-      { type: "delta",    id: "boatSpeed" },
-      { type: "delta",    id: "heading" },
-      { type: "attitude", id: "attitude" },
-      { type: "delta",    id: "leeway" },
-      { type: "delta",    id: "mast" },
-      { type: "polar",    id: "groundSpeed" },
+      { type: "polar",    id: "apparentWind.smoothed" },
+      { type: "delta",    id: "boatSpeed.smoothed" },
+      { type: "delta",    id: "heading.smoothed" },
+      { type: "attitude", id: "attitude.smoothed" },
+      { type: "delta",    id: "leeway.smoothed" },
+      { type: "delta",    id: "mast.smoothed" },
+      { type: "polar",    id: "groundSpeed.smoothed" },
     ],
     outputs: []
   },
@@ -488,7 +504,7 @@ const stepConfigs = {
     parameters: ["rotationPath", "rotationSource"],
     inputs:  [
       { type: "polar", id: "mastRotIn" },
-      { type: "delta", id: "mast" }
+      { type: "delta", id: "mast.smoothed" }
     ],
     outputs: [
       { type: "polar", id: "mastRotOut" }
@@ -500,7 +516,7 @@ const stepConfigs = {
     parameters: ["attitudeSource"],
     inputs:  [
       { type: "polar",    id: "mastHeelIn" },
-      { type: "attitude", id: "attitude" }
+      { type: "attitude", id: "attitude.smoothed" }
     ],
     outputs: [
       { type: "polar", id: "mastHeelOut" }
@@ -519,7 +535,7 @@ const stepConfigs = {
     ],
     inputs:  [
       { type: "polar",    id: "mastMoveIn" },
-      { type: "attitude", id: "attitude" },
+      { type: "attitude", id: "attitude.smoothed" },
       { type: "polar",    id: "sensorSpeed" }
     ],
     outputs: [
@@ -544,7 +560,7 @@ const stepConfigs = {
     parameters: ["leewaySource"],
     inputs:  [
       { type: "polar", id: "leewayIn" },
-      { type: "delta", id: "leeway" }
+      { type: "delta", id: "leeway.smoothed" }
     ],
     outputs: [
       { type: "polar", id: "leewayOut" }
@@ -556,7 +572,7 @@ const stepConfigs = {
     parameters: ["boatSpeedSource"],
     inputs:  [
       { type: "polar", id: "trueWindIn" },
-      { type: "delta", id: "boatSpeed" }
+      { type: "delta", id: "boatSpeed.smoothed" }
     ],
     outputs: [
       { type: "polar", id: "trueWind" }
@@ -581,7 +597,7 @@ const stepConfigs = {
     ],
     inputs:  [
       { type: "polar", id: "heightOut" },
-      { type: "delta", id: "boatSpeed" }
+      { type: "delta", id: "boatSpeed.smoothed" }
     ],
     outputs: [
       { type: "polar", id: "backCalcOut" }
@@ -593,8 +609,8 @@ const stepConfigs = {
     parameters: ["groundSpeedSource", "headingSource"],
     inputs:  [
       { type: "polar", id: "groundWindIn" },
-      { type: "polar", id: "groundSpeed" },
-      { type: "delta", id: "heading" }
+      { type: "polar", id: "groundSpeed.smoothed" },
+      { type: "delta", id: "heading.smoothed" }
     ],
     outputs: [
       { type: "polar", id: "groundWind" }
@@ -622,29 +638,50 @@ function getStateItem(item) {
   }
 }
 
+// Format a value in the given units to a human-readable string.
+// Prefers SK displayUnits (user unit preferences from the server) when available.
+// Falls back to default conversions (m/s → kn, rad → °) when absent.
+function _parseDecimals(displayFormat) {
+  if (!displayFormat) return 1;
+  const dot = displayFormat.indexOf('.');
+  return dot < 0 ? 0 : displayFormat.length - dot - 1;
+}
+
+function _formatUnit(value, displayUnits, rawUnits) {
+  if (typeof value !== "number") return "—";
+  // Default displayUnits by SI unit; SK server preferences override these.
+  const defaults =
+    rawUnits === "m/s"               ? { formula: "value * 1.943844",      symbol: "kn", displayFormat: "0.0" } :
+    (!rawUnits || rawUnits === "rad") ? { formula: "value * 180 / Math.PI", symbol: "°",  displayFormat: "0.1" } :
+                                        { formula: "value",                 symbol: rawUnits, displayFormat: "0.2" };
+  const du = { ...defaults, ...displayUnits };
+  // Formula is a Math.js expression from the trusted local SK server (e.g. "value * 1.94384").
+  // eslint-disable-next-line no-new-func
+  const converted = new Function('value', 'return ' + du.formula)(value);
+  return converted.toFixed(_parseDecimals(du.displayFormat)) + ' ' + du.symbol;
+}
+
 // Format a live state object as a short readable string.
+// Uses unit metadata from the static meta dict where available.
 function formatStateValue(type, data) {
   if (!data) return "—";
+  const m = meta[data.id];
   switch (type) {
     case "polar": {
-      const spd = typeof data.magnitude === "number"
-        ? (data.magnitude * 1.943844).toFixed(1) + " kn" : "—";
-      const ang = typeof data.angle === "number"
-        ? (data.angle * 180 / Math.PI).toFixed(1) + "°" : "—";
+      if (typeof data.magnitude !== "number" || typeof data.angle !== "number") return "—";
+      const spd = _formatUnit(data.magnitude, m?.magnitude?.displayUnits, m?.magnitude?.units);
+      const ang = _formatUnit(data.angle,     m?.angle?.displayUnits,     m?.angle?.units);
       return `${spd} / ${ang}`;
     }
     case "delta": {
-      if (typeof data.value !== "number") return "—";
-      const unit = data.displayAttributes && data.displayAttributes.unit;
-      if (unit === "m/s") return (data.value * 1.943844).toFixed(1) + " kn";
-      // default: angle in radians → degrees
-      return (data.value * 180 / Math.PI).toFixed(1) + "°";
+      return _formatUnit(data.value, m?.displayUnits, m?.units);
     }
     case "attitude": {
       if (!data.value) return "—";
-      const r = (data.value.roll  * 180 / Math.PI).toFixed(1);
-      const p = (data.value.pitch * 180 / Math.PI).toFixed(1);
-      return `roll ${r}° / pitch ${p}°`;
+      // Attitude components (roll/pitch) are always radians; no SK path meta per component.
+      const r = _formatUnit(data.value.roll,  null, "rad");
+      const p = _formatUnit(data.value.pitch, null, "rad");
+      return `roll ${r} / pitch ${p}`;
     }
     default: return "—";
   }
@@ -659,9 +696,7 @@ function createDataTable(items) {
     const row  = table.insertRow();
     if (isStale(data)) row.className = "stale";
     const nameCell = row.insertCell();
-    nameCell.textContent = data
-      ? (data.displayAttributes && data.displayAttributes.label) || item.id
-      : item.id;
+    nameCell.textContent = meta[item.id]?.displayName ?? item.id;
     const valCell = row.insertCell();
     valCell.textContent = data ? formatStateValue(item.type, data) : "—";
   });
@@ -669,7 +704,8 @@ function createDataTable(items) {
 }
 
 // Build the interactive control for a single config parameter.
-function createParamControl(key, meta, value) {
+// readOnly: when true, source (sourceOf) params are displayed as plain text.
+function createParamControl(key, meta, value, readOnly) {
   const container = document.createElement("span");
   if (meta.type === "boolean") {
     const lbl = document.createElement("label");
@@ -715,34 +751,40 @@ function createParamControl(key, meta, value) {
     sel.onchange = () => updateConfigAtPath(key, sel.value);
     container.appendChild(sel);
   } else if (meta.sourceOf) {
-    // Source selector: build a <select> from the sources array on the state item.
-    const sel = document.createElement("select");
-    sel.className = "form-select form-select-sm d-inline-block";
-    sel.style.width = "180px";
-    // Always offer an empty option meaning "any source / no filter".
-    const blankOpt = document.createElement("option");
-    blankOpt.value = "";
-    blankOpt.textContent = "(any)";
-    sel.appendChild(blankOpt);
-    // Populate from the state item's sources array.
-    // Polars expose magnitudeSources / angleSources; deltas/attitudes use sources.
-    // meta.sourceField selects which polar field to read (default: magnitudeSources).
-    const stateItem = getStateItem(meta.sourceOf);
-    const sourceField = meta.sourceField || "magnitudeSources";
-    const sources = stateItem
-      ? (Array.isArray(stateItem[sourceField]) ? stateItem[sourceField]
-        : Array.isArray(stateItem.sources)      ? stateItem.sources
-        : [])
-      : [];
-    sources.forEach(src => {
-      const opt = document.createElement("option");
-      opt.value = src;
-      opt.textContent = src;
-      sel.appendChild(opt);
-    });
-    sel.value = value || "";
-    sel.onchange = () => updateConfigAtPath(key, sel.value);
-    container.appendChild(sel);
+    if (readOnly) {
+      // Display-only: show the current source value as plain text.
+      const span = document.createElement("span");
+      span.className = "form-control-plaintext form-control-sm d-inline-block";
+      span.style.width = "180px";
+      span.textContent = value || "(any)";
+      container.appendChild(span);
+    } else {
+      // Source selector: build a <select> from the sources array on the state item.
+      const sel = document.createElement("select");
+      sel.className = "form-select form-select-sm d-inline-block";
+      sel.style.width = "180px";
+      // Always offer an empty option meaning "any source / no filter".
+      const blankOpt = document.createElement("option");
+      blankOpt.value = "";
+      blankOpt.textContent = "(any)";
+      sel.appendChild(blankOpt);
+      // Populate from the state item's sources array.
+      // All smoother types (MessageSmoother, PolarSmoother) expose sources at state.sources.
+      const stateItem = getStateItem(meta.sourceOf);
+      let sources = [];
+      if (stateItem && stateItem.state) {
+        sources = stateItem.state.sources ?? [];
+      }
+      sources.forEach(src => {
+        const opt = document.createElement("option");
+        opt.value = src;
+        opt.textContent = src;
+        sel.appendChild(opt);
+      });
+      sel.value = value || "";
+      sel.onchange = () => updateConfigAtPath(key, sel.value);
+      container.appendChild(sel);
+    }
   } else {
     const inp = document.createElement("input");
     inp.type  = "text";
@@ -758,10 +800,7 @@ function createParamControl(key, meta, value) {
 // Return true if a state item is considered stale / unavailable.
 function isStale(data) {
   if (!data) return true;
-  // Top-level stale flag (set by signalkutilities on handlers)
-  if (data.stale === true) return true;
-  // displayAttributes.stale is also used
-  if (data.displayAttributes && data.displayAttributes.stale === true) return true;
+  if (data.state?.stale === true) return true;
   return false;
 }
 
@@ -776,7 +815,7 @@ function getCannotActivateReasons(cfg) {
     if (!data) {
       reasons.push(`No data available for "${item.id}"`);
     } else if (isStale(data)) {
-      const label = (data.displayAttributes && data.displayAttributes.label) || item.id;
+      const label = meta[item.id]?.displayName ?? item.id;
       reasons.push(`"${label}" data is stale or missing`);
     }
   });
@@ -872,7 +911,7 @@ function renderPanel(step) {
     return !meta || meta.type === "string";
   });
 
-  function buildParamTable(params) {
+  function buildParamTable(params, readOnly) {
     const table = document.createElement("table");
     table.className = "table table-sm table-borderless mb-0";
     params.forEach(entry => {
@@ -884,7 +923,7 @@ function renderPanel(step) {
       const rowLabel = meta.path || meta.label;
       nameCell.textContent = meta.unit ? `${rowLabel} (${meta.unit})` : rowLabel;
       const valCell  = row.insertCell();
-      valCell.appendChild(createParamControl(key, meta, value));
+      valCell.appendChild(createParamControl(key, meta, value, readOnly));
       if (meta.default !== undefined && value !== meta.default) {
         const btn = document.createElement("button");
         btn.className = "btn btn-link btn-sm p-0 ms-1";
@@ -902,9 +941,10 @@ function renderPanel(step) {
     settingsEl.appendChild(buildParamTable(settingParams));
   }
 
+  const sourcesReadOnly = step.id !== "inputs";
   if (sourcesEl && sourceParams.length > 0) {
     sourcesEl.appendChild(sceneSectionHeading("Sources"));
-    sourcesEl.appendChild(buildParamTable(sourceParams));
+    sourcesEl.appendChild(buildParamTable(sourceParams, sourcesReadOnly));
   }
 }
 
@@ -960,7 +1000,7 @@ function renderPanelLive(step) {
       if (!data) {
         missing.push(`"${item.id}" — no data available`);
       } else if (isStale(data)) {
-        const label = (data.displayAttributes && data.displayAttributes.label) || item.id;
+        const label = meta[item.id]?.displayName ?? item.id;
         missing.push(`"${label}" — data is stale or missing`);
       }
     });
@@ -1020,7 +1060,7 @@ function renderAll() {
 }
 
 async function tick() {
-  const data = await fetchState();
+  const data = await fetchReport();
   if (!data) {
     // A failed fetch may mean the server restarted; re-sync config in case it changed,
     // then refresh the settings panel so controls reflect the new config.
@@ -1033,6 +1073,7 @@ async function tick() {
 }
 
 async function start() {
+  await loadMeta();
   await fetchConfig();
   renderAll();
   await tick();
