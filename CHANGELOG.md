@@ -36,15 +36,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Ground wind speed and direction are calculated
 - Ground wind direction uses 0 to 2PI range instead of (-PI to PI)
 
-## [2.5.0] - 2026-03-08
+## [2.5.0] - 2026-03-13
 ### Added
-- New webapp that provides insight in every correction and calculation and that lets you configure the plugin.
+- New webapp that provides insight in every correction and calculation.
+- runtime configuration of the plugin via the webapp including selectable data sources
+- support for unitPreferences.
+- configurable settings for data smoothing
 
 ### Removed
 - Old webapp
 - Standalone SVG view (`vectors.html`, `vectors.js`)
 - Legacy API routes `/getResults` and `/getVectors`
-- Standard signalk configuration
+- Standard signalk configuration via plugin.schema
 
 ### Fixed
 - Double correction for leeway
+- Processing data from other contexts than vessels.self and writing back to vessels.self
