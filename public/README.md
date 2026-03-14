@@ -1,30 +1,28 @@
-# Advanced wind webapp for SignalK
+# Advanced Wind Insight webapp for SignalK
 
 ## Function and goal of the webapp
-The Advanced wind webapp accompanies the Advanced wind plugin. Its function is to provide insight in the calculations made by the webapp. This makes it possible for a user to see the effect of the different calculations and corrections and thereby to tweak them. The webapp provide insight in two different ways:
-- A real time graphical representation of all the wind and vessel vectors that are involved
-- A real time numerical representation of each unput used and the result of each individual calculation that is made by the plugin.
+The Advanced Wind Insight webapp accompanies the Advanced Wind plugin. It provides real-time insight into every step of the wind calculation pipeline and also serves as the live configuration interface for the plugin — all corrections, parameters, data sources and smoother settings can be changed directly in the webapp while the plugin is running.
 
-## The wind and vessel speed graph
-This graph shows the speed and direction of both the vessel and the wind and the tilt angle of the vessel.Wind and vessel vectors are only included in the graph when they are used and available as input or are calculated by the plugin. The behaviour of the plugin is controlled by its settings.
+## Sidebar navigation
+The webapp has a sidebar listing each stage of the calculation pipeline. Clicking a step shows the details for that stage:
 
-The following elements can be seen in the graph:
-- The vessel and the mast are shown in purple. The mast is no more then a dot when the vessel is perfectly level but it will become a line segment when the vessel is tilted. It is as if one is looking at the vessel from above.
-- The speed of the sensor in respect to the vessel is represented as the small green vector that originates from the mast top.
-- The wind speed as measured by the sensor is shown in orange. It originates from the mast top.
-- The speed of the vessel through the water is shown in light blue. If leeway is used then the vector will indicate this by being slightly off centered from the vessel.
-- The speed of the vessel over ground is shown in gray.
-- The apparent wind is shown in red.
-- The wind over water (often called true wind) is shown in dark blue.
-- The wind over ground is shown in black.
+- **Overview** — a summary vector diagram of the main inputs (apparent wind, boat speed, ground speed) and outputs (true wind, corrected apparent wind, ground wind).
+- **Inputs** — all incoming Signal K paths with their current values, source selectors and smoother settings (smoother type and parameters).
+- **Misalignment** — sensor misalignment correction.
+- **Mast Rotation** — rotating mast correction.
+- **Mast Heel** — mast heel (tilt) correction.
+- **Mast Movement** — mast movement correction due to vessel rolling.
+- **Upwash** — upwash angle correction.
+- **Leeway** — leeway angle correction.
+- **True Wind** — the true wind (wind over water) calculation step.
+- **Height / 10 m** — wind gradient normalisation to a 10 m reference height.
+- **Back Calc AW** — back-calculation of apparent wind from true wind.
+- **Ground Wind** — wind over ground calculation.
 
-The vectors have markings indicating speed. For low speeds there is a marking for every knot and a double marker each five knots. For highter speeds there is a marker for every 5 knots of speed and a double marker every tenth knot.
-
-The wind and vessel speed graph can be embedded in other HTML pages. To embed embed the graph in @mxtommy/KIP use a "component/embedded webpage" and set the url to /advancedwind/vectors.html .
-![Alt text](embed example.png)
-
-## The calculations page
-This page shows real time the value of all the input paths and the results of each calculation. I hope this is self explainatory.
-
-
+## What each step shows
+Each step page contains:
+- A live **vector diagram** showing the wind and vessel vectors relevant to that step, coloured by type (apparent wind in orange, true wind in dark blue, ground wind in black, boat speed in light blue, ground speed in grey, corrected wind in green).
+- **Settings** that are relevant to the step. Settings can be modified and modifications will take effect immediately. 
+- A **data table** listing every input and output for the step with its current value, unit and a data-quality indicator showing whether the value is live, stale or missing.
+- **Controls** to enable or disable the correction for that step and adjust its parameters. Changes take effect immediately without restarting the plugin.
 
