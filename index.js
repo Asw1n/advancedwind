@@ -1,8 +1,8 @@
-const { Polar, PolarSmoother, SmoothedAngle, Reporter, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother, PassThroughSmoother, MessageSmoother, createSmoothedPolar, createSmoothedHandler } = require('signalkutilities');
+const { Polar, PolarSmoother, SmoothedAngle, Reporter, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother, PassThroughSmoother, MessageSmoother, MessageHandler, createSmoothedPolar, createSmoothedHandler } = require('signalkutilities');
 const path = require('path');
 
 module.exports = function (app) {
-  const currentVersion = "3.1";
+  const currentVersion = "3.2";
 
   let options = {};
   let changedOptions = {};
@@ -62,6 +62,52 @@ module.exports = function (app) {
     'windShiftSlowTimeSpan': 300,
     'windShiftSlowSteadyState': 0.02
   };
+
+  // Authoritative bounds for every numeric option.
+  // { min?, max?, step } — absent keys mean unconstrained in that direction.
+  // step is a UI hint (spinner increment) served to the webapp so controls are data-driven.
+  // clampOptions() uses only min/max; step is passed through to the client unchanged.
+  const paramBounds = {
+    sensorMisalignment:          { min: -Math.PI,  max:  Math.PI,   step: Math.PI/180,  default:   0,      displayFactor: 180/Math.PI },  // stored in radians, displayed in degrees
+    heightAboveWater:            { min:  0,         max:  50,       step: 0.5,  default:  15      },
+    windExponent:                { min:  0.05,      max:  0.5,      step: 0.01, default:   0.14   },
+    upwashSlope:                 { min:  0,         max:  0.3,      step: 0.01, default:   0.05   },
+    upwashOffset:                { min:  0,         max:  4,        step: 0.1,  default:   1.5    },
+    smootherTau:                 { min:  0.0,       max:  5,        step: 0.5,  default:   0.45   },
+    smootherTimeSpan:            { min:  0.05,      max:  5,        step: 0.5,  default:   2      },
+    smootherSteadyState:         { min:  0.01,      max:  0.99,     step: 0.05, default:   0.2    },
+    attitudeSmootherTau:         { min:  0.5,       max:  3,        step: 0.5,  default:   1      },
+    attitudeSmootherTimeSpan:    { min:  0.5,       max:  3,        step: 0.5,  default:   1      },
+    attitudeSmootherSteadyState: { min:  0.01,      max:  0.99,     step: 0.05, default:   0.2    },
+    windShiftFastTau:            { min:  1,         max:  600,      step: 1,    default:  5      },
+    windShiftFastTimeSpan:       { min:  1,         max:  600,      step: 1,    default:  5      },
+    windShiftFastSteadyState:    { min:  0.0001,    max:  0.9999,   step: 0.1,  default:   0.001    },
+    windShiftSlowTau:            { min:  60,        max:  3600,     step: 10,   default: 300      },
+    windShiftSlowTimeSpan:       { min:  60,        max:  3600,     step: 10,   default: 300      },
+    windShiftSlowSteadyState: { min: 0.0000001, max: 0.9999, step: 0.1, default: 0.000001   },
+  };
+
+  // Clamp a plain options object against paramBounds.
+  // Returns a new object; only properties listed in paramBounds are potentially changed.
+  // Logs every clamped value at debug level.
+  function clampOptions(opts) {
+    const result = { ...opts };
+    for (const [key, bounds] of Object.entries(paramBounds)) {
+      if (!(key in result) || typeof result[key] !== 'number') continue;
+      let val = result[key];
+      if (bounds.min !== undefined && val < bounds.min) {
+        app.debug(`Clamped ${key}: ${val} → ${bounds.min} (below minimum ${bounds.min})`);
+        val = bounds.min;
+      }
+      if (bounds.max !== undefined && val > bounds.max) {
+        app.debug(`Clamped ${key}: ${val} → ${bounds.max} (above maximum ${bounds.max})`);
+        val = bounds.max;
+      }
+      result[key] = val;
+    }
+    return result;
+  }
+
   let isRunning = false;
 
   function readOptions() {
@@ -70,7 +116,7 @@ module.exports = function (app) {
     let temp = stored.configuration || {};
     if (temp.configuration) {
       app.debug("Migrating double-nested configuration");
-      options = { ...temp.configuration };
+      options = clampOptions({ ...temp.configuration });
       saveOptions();
       return;
     }
@@ -87,18 +133,31 @@ module.exports = function (app) {
       options = { ...options, ...temp.corrections };
       options = { ...options, ...temp.outputOptions };
       options = { ...options, ...temp.parameters };
+      options.sensorMisalignment = (options.sensorMisalignment || 0) * Math.PI / 180;
       options.version = currentVersion;
+      options = clampOptions(options);
       saveOptions();
       return;
     }
     else if (temp.version === "3.0") {
       options = { ...defaultOptions, ...temp };
+      options.sensorMisalignment = (options.sensorMisalignment || 0) * Math.PI / 180;
+      options = clampOptions(options);
+      options.version = currentVersion;
+      saveOptions();
+      return;
+    }
+    else if (temp.version === "3.1") {
+      // sensorMisalignment was stored in degrees; convert to radians.
+      options = { ...defaultOptions, ...temp };
+      options.sensorMisalignment = (options.sensorMisalignment || 0) * Math.PI / 180;
+      options = clampOptions(options);
       options.version = currentVersion;
       saveOptions();
       return;
     }
     else if (temp.version === currentVersion) {
-      options = { ...defaultOptions, ...temp };
+      options = clampOptions({ ...defaultOptions, ...temp });
       return;
     }
   }
@@ -211,13 +270,23 @@ module.exports = function (app) {
     router.get('/settings', (req, res) => {
       // Merge pending changedOptions so the client always sees the latest intended state,
       // even if calculate() hasn't run yet to drain changedOptions into options.
-      res.json({ ...options, ...changedOptions });
+      // Include paramBounds under _bounds so the webapp can drive input constraints
+      // from a single authoritative source.
+      res.json({ ...options, ...changedOptions, _bounds: paramBounds });
     });
 
     router.put('/settings', (req, res) => {
-      changedOptions = { ...changedOptions, ...req.body || {} };
-      // Return the full merged config so the client can update itself in one round-trip.
-      res.json({ ...options, ...changedOptions });
+      // Clamp incoming numeric values against paramBounds before accepting them.
+      // This is the authoritative enforcement point — the clamped value is what
+      // gets stored and returned, so the webapp sees the corrected value immediately.
+      const clamped = clampOptions({ ...options, ...changedOptions, ...req.body || {} });
+      // Only carry forward the keys that were actually in the request body.
+      const incoming = req.body || {};
+      for (const key of Object.keys(incoming)) {
+        changedOptions[key] = clamped[key];
+      }
+      // Return the full merged config (with bounds) so the client can update itself.
+      res.json({ ...options, ...changedOptions, _bounds: paramBounds });
     });
 
     // Placeholder endpoint for discovering available sources per Signal K path.
@@ -247,86 +316,41 @@ module.exports = function (app) {
 
   function buildSmootherOptions(opts) {
     switch (opts.smootherClass || 'KalmanSmoother') {
-      case 'ExponentialSmoother': {
-        const tau = Math.max(0.05, opts.smootherTau ?? 1);
-        return { tau };
-      }
-      case 'MovingAverageSmoother': {
-        const timeSpan = Math.max(0.05, opts.smootherTimeSpan ?? 1);
-        return { timeSpan };
-      }
-      case 'PassThroughSmoother':
-        return {};
+      case 'ExponentialSmoother':   return { tau:         opts.smootherTau         ?? 1    };
+      case 'MovingAverageSmoother': return { timeSpan:    opts.smootherTimeSpan    ?? 1    };
+      case 'PassThroughSmoother':   return {};
       case 'KalmanSmoother':
-      default: {
-        const raw = opts.smootherSteadyState ?? 0.3;
-        const steadyState = Math.min(0.99, Math.max(0.01, raw));
-        return { steadyState };
-      }
+      default:                      return { steadyState: opts.smootherSteadyState ?? 0.3  };
     }
   }
 
   function buildAttitudeSmootherOptions(opts) {
-    const cls = opts.attitudeSmootherClass || 'MovingAverageSmoother';
-    switch (cls) {
-      case 'ExponentialSmoother': {
-        const tau = Math.max(0.05, opts.attitudeSmootherTau ?? 1);
-        return { tau };
-      }
-      case 'PassThroughSmoother':
-        return {};
-      case 'KalmanSmoother': {
-        const raw = opts.attitudeSmootherSteadyState ?? 0.2;
-        const steadyState = Math.min(0.99, Math.max(0.01, raw));
-        return { steadyState };
-      }
+    switch (opts.attitudeSmootherClass || 'MovingAverageSmoother') {
+      case 'ExponentialSmoother':   return { tau:         opts.attitudeSmootherTau         ?? 1   };
+      case 'PassThroughSmoother':   return {};
+      case 'KalmanSmoother':        return { steadyState: opts.attitudeSmootherSteadyState ?? 0.2 };
       case 'MovingAverageSmoother':
-      default: {
-        const timeSpan = Math.max(0.05, opts.attitudeSmootherTimeSpan ?? 1);
-        return { timeSpan };
-      }
+      default:                      return { timeSpan:    opts.attitudeSmootherTimeSpan    ?? 1   };
     }
   }
 
   function buildWindShiftFastOptions(opts) {
     switch (opts.windShiftFastClass || 'ExponentialSmoother') {
-      case 'ExponentialSmoother': {
-        const tau = Math.max(1, opts.windShiftFastTau ?? 30);
-        return { tau };
-      }
-      case 'MovingAverageSmoother': {
-        const timeSpan = Math.max(1, opts.windShiftFastTimeSpan ?? 30);
-        return { timeSpan };
-      }
-      case 'PassThroughSmoother':
-        return {};
+      case 'ExponentialSmoother':   return { tau:         opts.windShiftFastTau         ?? 30  };
+      case 'MovingAverageSmoother': return { timeSpan:    opts.windShiftFastTimeSpan    ?? 30  };
+      case 'PassThroughSmoother':   return {};
       case 'KalmanSmoother':
-      default: {
-        const raw = opts.windShiftFastSteadyState ?? 0.1;
-        const steadyState = Math.min(0.99, Math.max(0.01, raw));
-        return { steadyState };
-      }
+      default:                      return { steadyState: opts.windShiftFastSteadyState ?? 0.1 };
     }
   }
 
   function buildWindShiftSlowOptions(opts) {
     switch (opts.windShiftSlowClass || 'ExponentialSmoother') {
-      case 'ExponentialSmoother': {
-        const tau = Math.max(1, opts.windShiftSlowTau ?? 300);
-        return { tau };
-      }
-      case 'MovingAverageSmoother': {
-        const timeSpan = Math.max(1, opts.windShiftSlowTimeSpan ?? 300);
-        return { timeSpan };
-      }
-      case 'PassThroughSmoother':
-        return {};
+      case 'ExponentialSmoother':   return { tau:         opts.windShiftSlowTau         ?? 300  };
+      case 'MovingAverageSmoother': return { timeSpan:    opts.windShiftSlowTimeSpan    ?? 300  };
+      case 'PassThroughSmoother':   return {};
       case 'KalmanSmoother':
-      default: {
-        const raw = opts.windShiftSlowSteadyState ?? 0.02;
-        const steadyState = Math.min(0.99, Math.max(0.01, raw));
-        return { steadyState };
-      }
+      default:                      return { steadyState: opts.windShiftSlowSteadyState ?? 0.02 };
     }
   }
 
@@ -339,6 +363,14 @@ module.exports = function (app) {
     readOptions();
     const outputs = [];
     reportFull = new Reporter();
+
+    function sendWindShiftMeta() {
+      MessageHandler.sendMeta(app, plugin.id, [
+        { path: 'environment.wind.directionTrue.trend.fast',  value: { units: 'rad', description: 'Fast moving average of true wind direction', displayUnits: { category: 'angle' } } },
+        { path: 'environment.wind.directionTrue.trend.slow',  value: { units: 'rad', description: 'Slow moving average of true wind direction (reference)', displayUnits: { category: 'angle' } } },
+        { path: 'environment.wind.directionTrue.trend.shift', value: { units: 'rad', description: 'Wind shift: angle difference between fast and slow mean wind directions', displayUnits: { category: 'angle' } } },
+      ]);
+    }
     let SmootherClass = resolveSmootherClass(options.smootherClass);
     let smootherOptions = buildSmootherOptions(options);
 
@@ -598,6 +630,8 @@ module.exports = function (app) {
       report() { return { id: this.id, value: this.value, state: this.state }; }
     };
 
+    if (options.detectWindShift) sendWindShiftMeta();
+
     // Recalculate windShift whenever windShiftFast gets a new sample.
     windShiftFast.onChange = () => {
       if (!options.detectWindShift) return;
@@ -607,6 +641,14 @@ module.exports = function (app) {
       const raw = fast - slow;
       windShift.value = ((raw + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
       windShift.stale = false;
+      app.handleMessage(plugin.id, {
+        context: 'vessels.self',
+        updates: [{ $source: plugin.id, values: [
+          { path: 'environment.wind.directionTrue.trend.fast',  value: fast },
+          { path: 'environment.wind.directionTrue.trend.slow',  value: slow },
+          { path: 'environment.wind.directionTrue.trend.shift', value: windShift.value },
+        ]}]
+      });
     };
 
     //# endregion initialization of paths
@@ -665,7 +707,7 @@ module.exports = function (app) {
       misalignIn.copyFrom(calculatedWind);
       if (options.correctForMisalign) {
         const misalignValue = isNaN(options.sensorMisalignment) ? 0 : options.sensorMisalignment;
-        calculatedWind.rotate(-misalignValue * Math.PI / 180);
+        calculatedWind.rotate(-misalignValue);  // stored in radians
       }
       misalignOut.copyFrom(calculatedWind);
 
@@ -811,6 +853,9 @@ module.exports = function (app) {
           case 'attitudeSmootherTimeSpan':
           case 'attitudeSmootherSteadyState':
             needsSmootherReset = true;
+            break;
+          case 'detectWindShift':
+            if (value) sendWindShiftMeta();
             break;
           case 'windShiftFastClass':
           case 'windShiftFastTau':

@@ -108,7 +108,9 @@ function _drawVectors(svg, polars, heading, scale) {
 function _buildScenePolars(stepId, cfg, st) {
   const pb = st.polarsById;
   // Clone a polar with a different id for colour mapping.
-  const as = (src, id) => src ? { ...src, id } : null;
+  // Preserve plane from meta keyed by the original id, since report() doesn't include it
+  // and after aliasing meta[newId] won't find it.
+  const as = (src, id) => src ? { ...src, id, plane: src.plane ?? meta[src.id]?.plane } : null;
   const ok = arr => arr.filter(Boolean);
 
   // Geometry-based heel and mastMove vectors (bypass wind scale).
@@ -393,14 +395,16 @@ function getConfigValue(key) {
 }
 
 // --- Parameter metadata ---
-// Provides label, unit and HTML input constraints for every flat config key.
+// Provides label, unit and type for every flat config key.
+// min/max/step for numeric params are served by the plugin via config._bounds —
+// do not duplicate them here; createParamControl reads them from config._bounds.
 const paramMeta = {
-  sensorMisalignment:        { label: "Sensor misalignment",                    unit: "°",  type: "number",  step: 0.1 },
-  heightAboveWater:          { label: "Sensor height above water",               unit: "m",  type: "number",  step: 0.5, min: 0 },
-  windExponent:              { label: "Wind gradient exponent (α)",              unit: "",   type: "number",  step: 0.01, min: 0.05, max: 0.5, default: 0.14 },
-  upwashSlope:               { label: "Upwash slope (α)",                        unit: "",   type: "number",  step: 0.01, min: 0, max: 0.3, default: 0.05 },
-  upwashOffset:              { label: "Upwash offset (β)",                       unit: "°",  type: "number",  step: 0.1,  min: -1, max: 4, default: 1.5 },
-  smootherClass:             { label: "Smoother type",                           unit: "",   type: "select",
+  sensorMisalignment:          { label: "Sensor misalignment",                                           unit: "°", type: "number" },
+  heightAboveWater:            { label: "Sensor height above water",                                     unit: "m", type: "number" },
+  windExponent:                { label: "Wind gradient exponent (α)",                                    unit: "",  type: "number" },
+  upwashSlope:                 { label: "Upwash slope (α)",                                              unit: "",  type: "number" },
+  upwashOffset:                { label: "Upwash offset (β)",                                             unit: "°", type: "number" },
+  smootherClass:               { label: "Smoother type",                                                 unit: "",  type: "select",
     options: [
       { value: "KalmanSmoother",        label: "Kalman filter" },
       { value: "ExponentialSmoother",   label: "Exponential (τ)" },
@@ -408,10 +412,10 @@ const paramMeta = {
       { value: "PassThroughSmoother",   label: "None (pass-through)" }
     ]
   },
-  smootherTau:               { label: "Time constant (τ)",                       unit: "s",  type: "number",  step: 0.05, min: 0.05, max: 60, default: 0.45 },
-  smootherTimeSpan:          { label: "Window size",                             unit: "s",  type: "number",  step: 0.05, min: 0.05, max: 60, default: 2 },
-  smootherSteadyState:        { label: "Kalman gain (0 = ignore sensor, 1 = trust fully)", unit: "",   type: "number",  step: 0.05, min: 0.01, max: 0.99, default: 0.2 },
-  attitudeSmootherClass:     { label: "Attitude smoother type",                     unit: "",   type: "select",
+  smootherTau:                 { label: "Time constant (τ)",                                              unit: "s", type: "number" },
+  smootherTimeSpan:            { label: "Window size",                                                   unit: "s", type: "number" },
+  smootherSteadyState:         { label: "Kalman gain (0 = ignore sensor, 1 = trust fully)",              unit: "",  type: "number" },
+  attitudeSmootherClass:       { label: "Attitude smoother type",                                        unit: "",  type: "select",
     options: [
       { value: "MovingAverageSmoother", label: "Moving Average (window)" },
       { value: "ExponentialSmoother",   label: "Exponential (τ)" },
@@ -419,22 +423,22 @@ const paramMeta = {
       { value: "PassThroughSmoother",   label: "None (pass-through)" }
     ]
   },
-  attitudeSmootherTau:        { label: "Attitude time constant (τ)",                 unit: "s",  type: "number",  step: 0.05, min: 0.05, max: 120, default: 1 },
-  attitudeSmootherTimeSpan:   { label: "Attitude window size",                       unit: "s",  type: "number",  step: 0.05, min: 0.05, max: 120, default: 1 },
-  attitudeSmootherSteadyState: { label: "Attitude Kalman gain",                      unit: "",   type: "number",  step: 0.05, min: 0.01, max: 0.99, default: 0.2 },
-  headingSource:             { label: "Heading source",        path: "navigation.headingTrue",              unit: "",   type: "string", sourceOf: { type: "delta",    id: "heading.smoothed" } },
-  attitudeSource:            { label: "Attitude source",       path: "navigation.attitude",                 unit: "",   type: "string", sourceOf: { type: "attitude", id: "attitude.smoothed" } },
-  boatSpeedSource:           { label: "Boat speed source",     path: "navigation.speedThroughWater",        unit: "",   type: "string", sourceOf: { type: "delta", id: "boatSpeed.smoothed" } },
-  leewaySource:              { label: "Leeway angle source",   path: "navigation.leewayAngle",              unit: "",   type: "string", sourceOf: { type: "delta", id: "leeway.smoothed" } },
-  windSpeedSource:           { label: "Wind speed source",     path: "environment.wind.speedApparent",      unit: "",   type: "string", sourceOf: { type: "polar",    id: "apparentWind.smoothed" } },
-  rotationPath:              { label: "Mast rotation path",                                                 unit: "",   type: "string" },
-  rotationSource:            { label: "Mast rotation source",  path: "(see rotation path above)",          unit: "",   type: "string", sourceOf: { type: "delta",    id: "mast.smoothed" } },
-  groundSpeedSource:         { label: "Ground speed source",   path: "navigation.speedOverGround",          unit: "",   type: "string", sourceOf: { type: "polar",    id: "groundSpeed.smoothed" } },
-  calculateGroundWind:       { label: "Calculate Wind direction",                   unit: "",   type: "boolean" },
-  backCalculateApparentWind: { label: "Back-calculate apparent wind",            unit: "",   type: "boolean" },
-  preventDuplication:        { label: "Replace apparent wind (prevent duplication)", unit: "", type: "boolean" },
-  detectWindShift:           { label: "Detect wind shifts",                      unit: "",   type: "boolean" },
-  windShiftFastClass:        { label: "Fast smoother type",                      unit: "",   type: "select",
+  attitudeSmootherTau:         { label: "Attitude time constant (τ)",                                    unit: "s", type: "number" },
+  attitudeSmootherTimeSpan:    { label: "Attitude window size",                                          unit: "s", type: "number" },
+  attitudeSmootherSteadyState: { label: "Attitude Kalman gain",                                         unit: "",  type: "number" },
+  headingSource:               { label: "Heading source",       path: "navigation.headingTrue",          unit: "",  type: "string", sourceOf: { type: "delta",    id: "heading.smoothed" } },
+  attitudeSource:              { label: "Attitude source",      path: "navigation.attitude",             unit: "",  type: "string", sourceOf: { type: "attitude", id: "attitude.smoothed" } },
+  boatSpeedSource:             { label: "Boat speed source",    path: "navigation.speedThroughWater",    unit: "",  type: "string", sourceOf: { type: "delta",    id: "boatSpeed.smoothed" } },
+  leewaySource:                { label: "Leeway angle source",  path: "navigation.leewayAngle",          unit: "",  type: "string", sourceOf: { type: "delta",    id: "leeway.smoothed" } },
+  windSpeedSource:             { label: "Wind speed source",    path: "environment.wind.speedApparent",  unit: "",  type: "string", sourceOf: { type: "polar",    id: "apparentWind.smoothed" } },
+  rotationPath:                { label: "Mast rotation path",                                            unit: "",  type: "string" },
+  rotationSource:              { label: "Mast rotation source", path: "(see rotation path above)",       unit: "",  type: "string", sourceOf: { type: "delta",    id: "mast.smoothed" } },
+  groundSpeedSource:           { label: "Ground speed source",  path: "navigation.speedOverGround",      unit: "",  type: "string", sourceOf: { type: "polar",    id: "groundSpeed.smoothed" } },
+  calculateGroundWind:         { label: "Calculate Wind direction",                                      unit: "",  type: "boolean" },
+  backCalculateApparentWind:   { label: "Back-calculate apparent wind",                                  unit: "",  type: "boolean" },
+  preventDuplication:          { label: "Replace apparent wind (prevent duplication)",                   unit: "",  type: "boolean" },
+  detectWindShift:             { label: "Detect wind shifts",                                            unit: "",  type: "boolean" },
+  windShiftFastClass:          { label: "Fast smoother type",                                            unit: "",  type: "select",
     options: [
       { value: "ExponentialSmoother",   label: "Exponential (τ)" },
       { value: "MovingAverageSmoother", label: "Moving Average (window)" },
@@ -442,10 +446,10 @@ const paramMeta = {
       { value: "PassThroughSmoother",   label: "None (pass-through)" }
     ]
   },
-  windShiftFastTau:          { label: "Fast time constant (τ)",                  unit: "s",  type: "number",  step: 1,  min: 1,  max: 600,  default: 30 },
-  windShiftFastTimeSpan:     { label: "Fast window size",                        unit: "s",  type: "number",  step: 1,  min: 1,  max: 600,  default: 30 },
-  windShiftFastSteadyState:  { label: "Fast Kalman gain",                        unit: "",   type: "number",  step: 0.01, min: 0.01, max: 0.99, default: 0.1 },
-  windShiftSlowClass:        { label: "Slow smoother type",                      unit: "",   type: "select",
+  windShiftFastTau:            { label: "Fast time constant (τ)",                                        unit: "s", type: "number" },
+  windShiftFastTimeSpan:       { label: "Fast window size",                                              unit: "s", type: "number" },
+  windShiftFastSteadyState:    { label: "Fast Kalman gain",                                              unit: "",  type: "number" },
+  windShiftSlowClass:          { label: "Slow smoother type",                                            unit: "",  type: "select",
     options: [
       { value: "ExponentialSmoother",   label: "Exponential (τ)" },
       { value: "MovingAverageSmoother", label: "Moving Average (window)" },
@@ -453,9 +457,9 @@ const paramMeta = {
       { value: "PassThroughSmoother",   label: "None (pass-through)" }
     ]
   },
-  windShiftSlowTau:          { label: "Slow time constant (τ)",                  unit: "s",  type: "number",  step: 10, min: 1,  max: 3600, default: 300 },
-  windShiftSlowTimeSpan:     { label: "Slow window size",                        unit: "s",  type: "number",  step: 10, min: 1,  max: 3600, default: 300 },
-  windShiftSlowSteadyState:  { label: "Slow Kalman gain",                        unit: "",   type: "number",  step: 0.01, min: 0.01, max: 0.99, default: 0.02 }
+  windShiftSlowTau:            { label: "Slow time constant (τ)",                                        unit: "s", type: "number" },
+  windShiftSlowTimeSpan:       { label: "Slow window size",                                              unit: "s", type: "number" },
+  windShiftSlowSteadyState:    { label: "Slow Kalman gain",                                              unit: "",  type: "number" },
 };
 
 // --- Step definitions ---
@@ -650,7 +654,7 @@ const stepConfigs = {
     ]
   },
   windShift: {
-    description: "Detects wind shifts by comparing a fast-responding mean ground wind to a slow reference mean. Ground wind (wind over ground) is used as the stable, earth-fixed reference — true wind is not suitable because it shifts with current. Requires 'Wind direction' to be enabled.",
+    description: "Detects wind shifts by comparing a fast-responding mean ground wind to a slow reference mean.",
     correctionFlag: "detectWindShift",
     parameters: [
       "windShiftFastClass",
@@ -784,13 +788,20 @@ function createParamControl(key, meta, value, readOnly) {
   } else if (meta.type === "number") {
     const inp = document.createElement("input");
     inp.type  = "number";
-    inp.value = value !== undefined ? value : "";
-    if (meta.step !== undefined) inp.step = meta.step;
-    if (meta.min  !== undefined) inp.min  = meta.min;
-    if (meta.max  !== undefined) inp.max  = meta.max;
+    // min/max/step/displayFactor are served by the plugin in config._bounds.
+    // displayFactor converts between internal (stored) units and display units.
+    // e.g. sensorMisalignment is stored in radians but displayed in degrees.
+    const bounds = config && config._bounds && config._bounds[key];
+    const factor = (bounds && bounds.displayFactor) || 1;
+    inp.value = value !== undefined ? value * factor : "";
+    if (bounds) {
+      if (bounds.step !== undefined) inp.step = bounds.step * factor;
+      if (bounds.min  !== undefined) inp.min  = bounds.min  * factor;
+      if (bounds.max  !== undefined) inp.max  = bounds.max  * factor;
+    }
     inp.className = "form-control form-control-sm d-inline-block";
     inp.style.width = "80px";
-    inp.onchange = () => updateConfigAtPath(key, parseFloat(inp.value));
+    inp.onchange = () => updateConfigAtPath(key, parseFloat(inp.value) / factor);
     container.appendChild(inp);
   } else if (meta.type === "select") {
     const sel = document.createElement("select");
@@ -979,12 +990,15 @@ function renderPanel(step) {
       nameCell.textContent = meta.unit ? `${rowLabel} (${meta.unit})` : rowLabel;
       const valCell  = row.insertCell();
       valCell.appendChild(createParamControl(key, meta, value, readOnly));
-      if (meta.default !== undefined && value !== meta.default) {
+      const bounds = config && config._bounds && config._bounds[key];
+      const boundsDefault = bounds && bounds.default;
+      if (boundsDefault !== undefined && value !== boundsDefault) {
+        const factor = (bounds && bounds.displayFactor) || 1;
         const btn = document.createElement("button");
         btn.className = "btn btn-link btn-sm p-0 ms-1";
-        btn.title = `Reset to default (${meta.default})`;
+        btn.title = `Reset to default (${boundsDefault * factor})`;
         btn.textContent = "↺";
-        btn.onclick = () => updateConfigAtPath(key, meta.default);
+        btn.onclick = () => updateConfigAtPath(key, boundsDefault);  // send in internal units
         valCell.appendChild(btn);
       }
     });
