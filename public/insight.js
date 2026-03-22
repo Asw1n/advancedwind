@@ -205,6 +205,15 @@ function _buildScenePolars(stepId, cfg, st) {
       const list = [as(pb.groundWindIn, "apparentWind"), as(pb["groundSpeed.smoothed"], "groundSpeed"), pb.groundWind];
       return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
     }
+    case "windShift": {
+      // windShiftFast and windShiftSlow are angle deltas — build unit-length polars for the SVG.
+      const toUnit = (d) => d && typeof d.value === 'number'
+        ? { id: d.id, x: Math.cos(d.value), y: Math.sin(d.value), solid: true, plane: 'Ground' }
+        : null;
+      const fast = st.deltasById['windShiftFast'];
+      const slow = st.deltasById['windShiftSlow'];
+      return { polars: ok([toUnit(fast), toUnit(slow)]), geoPolars: [], showBoatSpeed: false };
+    }
     default:
       return { polars: ok([pb["apparentWind.smoothed"], pb.trueWind]), geoPolars: [], showBoatSpeed: false };
   }
@@ -279,7 +288,8 @@ const steps = [
   { id: "trueWind",   label: "True Wind" },
   { id: "height",     label: "Height / 10m" },
   { id: "backCalc",   label: "Back Calc AW" },
-  { id: "groundWind", label: "Wind direction" }
+  { id: "groundWind", label: "Wind direction" },
+  { id: "windShift",  label: "Wind Shift" }
 ];
 
 let currentStepId = "overview";
@@ -422,7 +432,30 @@ const paramMeta = {
   groundSpeedSource:         { label: "Ground speed source",   path: "navigation.speedOverGround",          unit: "",   type: "string", sourceOf: { type: "polar",    id: "groundSpeed.smoothed" } },
   calculateGroundWind:       { label: "Calculate Wind direction",                   unit: "",   type: "boolean" },
   backCalculateApparentWind: { label: "Back-calculate apparent wind",            unit: "",   type: "boolean" },
-  preventDuplication:        { label: "Replace apparent wind (prevent duplication)", unit: "", type: "boolean" }
+  preventDuplication:        { label: "Replace apparent wind (prevent duplication)", unit: "", type: "boolean" },
+  detectWindShift:           { label: "Detect wind shifts",                      unit: "",   type: "boolean" },
+  windShiftFastClass:        { label: "Fast smoother type",                      unit: "",   type: "select",
+    options: [
+      { value: "ExponentialSmoother",   label: "Exponential (τ)" },
+      { value: "MovingAverageSmoother", label: "Moving Average (window)" },
+      { value: "KalmanSmoother",        label: "Kalman filter" },
+      { value: "PassThroughSmoother",   label: "None (pass-through)" }
+    ]
+  },
+  windShiftFastTau:          { label: "Fast time constant (τ)",                  unit: "s",  type: "number",  step: 1,  min: 1,  max: 600,  default: 30 },
+  windShiftFastTimeSpan:     { label: "Fast window size",                        unit: "s",  type: "number",  step: 1,  min: 1,  max: 600,  default: 30 },
+  windShiftFastSteadyState:  { label: "Fast Kalman gain",                        unit: "",   type: "number",  step: 0.01, min: 0.01, max: 0.99, default: 0.1 },
+  windShiftSlowClass:        { label: "Slow smoother type",                      unit: "",   type: "select",
+    options: [
+      { value: "ExponentialSmoother",   label: "Exponential (τ)" },
+      { value: "MovingAverageSmoother", label: "Moving Average (window)" },
+      { value: "KalmanSmoother",        label: "Kalman filter" },
+      { value: "PassThroughSmoother",   label: "None (pass-through)" }
+    ]
+  },
+  windShiftSlowTau:          { label: "Slow time constant (τ)",                  unit: "s",  type: "number",  step: 10, min: 1,  max: 3600, default: 300 },
+  windShiftSlowTimeSpan:     { label: "Slow window size",                        unit: "s",  type: "number",  step: 10, min: 1,  max: 3600, default: 300 },
+  windShiftSlowSteadyState:  { label: "Slow Kalman gain",                        unit: "",   type: "number",  step: 0.01, min: 0.01, max: 0.99, default: 0.02 }
 };
 
 // --- Step definitions ---
@@ -614,6 +647,28 @@ const stepConfigs = {
     ],
     outputs: [
       { type: "polar", id: "groundWind" }
+    ]
+  },
+  windShift: {
+    description: "Detects wind shifts by comparing a fast-responding mean ground wind to a slow reference mean. Ground wind (wind over ground) is used as the stable, earth-fixed reference — true wind is not suitable because it shifts with current. Requires 'Wind direction' to be enabled.",
+    correctionFlag: "detectWindShift",
+    parameters: [
+      "windShiftFastClass",
+      { key: "windShiftFastTau",         showIf: cfg => (cfg.windShiftFastClass || "ExponentialSmoother") === "ExponentialSmoother" },
+      { key: "windShiftFastTimeSpan",    showIf: cfg => (cfg.windShiftFastClass || "ExponentialSmoother") === "MovingAverageSmoother" },
+      { key: "windShiftFastSteadyState", showIf: cfg => (cfg.windShiftFastClass || "ExponentialSmoother") === "KalmanSmoother" },
+      "windShiftSlowClass",
+      { key: "windShiftSlowTau",         showIf: cfg => (cfg.windShiftSlowClass || "ExponentialSmoother") === "ExponentialSmoother" },
+      { key: "windShiftSlowTimeSpan",    showIf: cfg => (cfg.windShiftSlowClass || "ExponentialSmoother") === "MovingAverageSmoother" },
+      { key: "windShiftSlowSteadyState", showIf: cfg => (cfg.windShiftSlowClass || "ExponentialSmoother") === "KalmanSmoother" },
+    ],
+    inputs: [
+      { type: "polar", id: "groundWind" }
+    ],
+    outputs: [
+      { type: "delta", id: "windShiftFast" },
+      { type: "delta", id: "windShiftSlow" },
+      { type: "delta", id: "windShift" }
     ]
   },
 };
@@ -1033,6 +1088,7 @@ function buildNav() {
     a.onclick = (e) => {
       e.preventDefault();
       currentStepId = step.id;
+      _scalePrev = 0;
       renderAll();
     };
     li.appendChild(a);

@@ -7,6 +7,9 @@
   --signalk-green: #43A047;
   --signalk-text-secondary: #546E7A;
   --groundWind-color: #1976d262;
+  --windShiftFast-color: #29B6F6;
+  --windShiftSlow-color: #78909C;
+  --windShift-color: #E53935;
 }
 
 /* --- SVG vector colours by element ID --- */
@@ -18,6 +21,9 @@
 #correctedWind   { stroke: var(--signalk-green); }
 #heelVector,
 #mastMoveVector  { stroke: var(--signalk-sidebar-bg); stroke-width: 1; }
+#windShiftFast   { stroke: var(--windShiftFast-color); }
+#windShiftSlow   { stroke: var(--windShiftSlow-color); }
+#windShift       { stroke: var(--windShift-color); stroke-width: 3; }
 
 /* --- SVG canvas --- */
 svg {

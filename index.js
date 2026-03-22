@@ -1,8 +1,8 @@
-const { Polar, Reporter, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother, PassThroughSmoother, MessageSmoother, createSmoothedPolar, createSmoothedHandler } = require('signalkutilities');
+const { Polar, PolarSmoother, SmoothedAngle, Reporter, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother, PassThroughSmoother, MessageSmoother, createSmoothedPolar, createSmoothedHandler } = require('signalkutilities');
 const path = require('path');
 
 module.exports = function (app) {
-  const currentVersion = "3.0";
+  const currentVersion = "3.1";
 
   let options = {};
   let changedOptions = {};
@@ -49,7 +49,18 @@ module.exports = function (app) {
     'leewaySource': '',
     'windSpeedSource': '',
     'rotationSource': '',
-    'groundSpeedSource': ''
+    'groundSpeedSource': '',
+
+    // Wind Shift Detection
+    'detectWindShift': false,
+    'windShiftFastClass': 'ExponentialSmoother',
+    'windShiftFastTau': 30,
+    'windShiftFastTimeSpan': 30,
+    'windShiftFastSteadyState': 0.1,
+    'windShiftSlowClass': 'ExponentialSmoother',
+    'windShiftSlowTau': 300,
+    'windShiftSlowTimeSpan': 300,
+    'windShiftSlowSteadyState': 0.02
   };
   let isRunning = false;
 
@@ -76,6 +87,12 @@ module.exports = function (app) {
       options = { ...options, ...temp.corrections };
       options = { ...options, ...temp.outputOptions };
       options = { ...options, ...temp.parameters };
+      options.version = currentVersion;
+      saveOptions();
+      return;
+    }
+    else if (temp.version === "3.0") {
+      options = { ...defaultOptions, ...temp };
       options.version = currentVersion;
       saveOptions();
       return;
@@ -133,6 +150,9 @@ module.exports = function (app) {
   let backCalcOut = null;                          // back-calculated apparent wind snapshot
   let groundWindIn = null;                         // groundWind step: no calculatedWind output
   let upwashAngle  = null;                         // computed upwash angle (rad) — scalar delta
+  let windShiftFast = null;  // SmoothedAngle on environment.wind.directionTrue (fast EMA)
+  let windShiftSlow = null;  // SmoothedAngle on environment.wind.directionTrue (slow EMA / reference)
+  let windShift     = null;  // inline delta: angle diff (rad) between fast and slow means
 
 
   plugin.registerWithRouter = function (router) {
@@ -264,6 +284,48 @@ module.exports = function (app) {
       default: {
         const timeSpan = Math.max(0.05, opts.attitudeSmootherTimeSpan ?? 1);
         return { timeSpan };
+      }
+    }
+  }
+
+  function buildWindShiftFastOptions(opts) {
+    switch (opts.windShiftFastClass || 'ExponentialSmoother') {
+      case 'ExponentialSmoother': {
+        const tau = Math.max(1, opts.windShiftFastTau ?? 30);
+        return { tau };
+      }
+      case 'MovingAverageSmoother': {
+        const timeSpan = Math.max(1, opts.windShiftFastTimeSpan ?? 30);
+        return { timeSpan };
+      }
+      case 'PassThroughSmoother':
+        return {};
+      case 'KalmanSmoother':
+      default: {
+        const raw = opts.windShiftFastSteadyState ?? 0.1;
+        const steadyState = Math.min(0.99, Math.max(0.01, raw));
+        return { steadyState };
+      }
+    }
+  }
+
+  function buildWindShiftSlowOptions(opts) {
+    switch (opts.windShiftSlowClass || 'ExponentialSmoother') {
+      case 'ExponentialSmoother': {
+        const tau = Math.max(1, opts.windShiftSlowTau ?? 300);
+        return { tau };
+      }
+      case 'MovingAverageSmoother': {
+        const timeSpan = Math.max(1, opts.windShiftSlowTimeSpan ?? 300);
+        return { timeSpan };
+      }
+      case 'PassThroughSmoother':
+        return {};
+      case 'KalmanSmoother':
+      default: {
+        const raw = opts.windShiftSlowSteadyState ?? 0.02;
+        const steadyState = Math.min(0.99, Math.max(0.01, raw));
+        return { steadyState };
       }
     }
   }
@@ -500,6 +562,53 @@ module.exports = function (app) {
     trueWind.setMeta({ displayName: "True Wind", plane: "Boat" });
     trueWind.angleRange = '-piToPi';
 
+    // Wind shift detection: two SmoothedAngles subscribing to the plugin's own groundWind output.
+    // A fake pluginId prevents the own-source echo guard from blocking the plugin's messages;
+    // source: plugin.id ensures only this plugin's groundWind deltas are accepted.
+    windShiftFast = new SmoothedAngle(app, 'windShiftFastInternal', 'windShiftFast',
+      'environment.wind.directionTrue', {
+        source: plugin.id,
+        passOn: true,
+        angleRange: '0to2pi',
+        meta: { displayName: 'Fast mean wind direction', plane: 'Ground' },
+        SmootherClass: resolveSmootherClass(options.windShiftFastClass),
+        smootherOptions: buildWindShiftFastOptions(options),
+      }
+    );
+    windShiftFast.id = 'windShiftFast';
+
+    windShiftSlow = new SmoothedAngle(app, 'windShiftSlowInternal', 'windShiftSlow',
+      'environment.wind.directionTrue', {
+        source: plugin.id,
+        passOn: true,
+        angleRange: '0to2pi',
+        meta: { displayName: 'Slow mean wind direction (reference)', plane: 'Ground' },
+        SmootherClass: resolveSmootherClass(options.windShiftSlowClass),
+        smootherOptions: buildWindShiftSlowOptions(options),
+      }
+    );
+    windShiftSlow.id = 'windShiftSlow';
+
+    windShift = {
+      id: 'windShift',
+      value: null,
+      stale: true,
+      meta: { displayName: 'Wind Shift', units: 'rad' },
+      get state() { return { stale: this.stale, frequency: null, sources: [] }; },
+      report() { return { id: this.id, value: this.value, state: this.state }; }
+    };
+
+    // Recalculate windShift whenever windShiftFast gets a new sample.
+    windShiftFast.onChange = () => {
+      if (!options.detectWindShift) return;
+      const fast = windShiftFast.value;
+      const slow = windShiftSlow.value;
+      if (typeof fast !== 'number' || typeof slow !== 'number') return;
+      const raw = fast - slow;
+      windShift.value = ((raw + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+      windShift.stale = false;
+    };
+
     //# endregion initialization of paths
 
     //# region defining report (always register complete set)
@@ -526,6 +635,10 @@ module.exports = function (app) {
     reportFull.addPolar(heightIn);    reportFull.addPolar(heightOut);
     reportFull.addPolar(backCalcOut);
     reportFull.addPolar(groundWindIn);
+    // Wind shift
+    reportFull.addDelta(windShiftFast);
+    reportFull.addDelta(windShiftSlow);
+    reportFull.addDelta(windShift);
     //#endregion defining report
 
     apparentWind.onChange = () => {
@@ -650,6 +763,7 @@ module.exports = function (app) {
 
     function applyOptionChanges() {
       let needsSmootherReset = false;
+      let needsWindShiftReset = false;
       // Pop each key-value pair from changedOptions
       for (const key of Object.keys(changedOptions)) {
         const value = changedOptions[key];
@@ -698,6 +812,16 @@ module.exports = function (app) {
           case 'attitudeSmootherSteadyState':
             needsSmootherReset = true;
             break;
+          case 'windShiftFastClass':
+          case 'windShiftFastTau':
+          case 'windShiftFastTimeSpan':
+          case 'windShiftFastSteadyState':
+          case 'windShiftSlowClass':
+          case 'windShiftSlowTau':
+          case 'windShiftSlowTimeSpan':
+          case 'windShiftSlowSteadyState':
+            needsWindShiftReset = true;
+            break;
         }
         delete changedOptions[key];
       }
@@ -720,6 +844,17 @@ module.exports = function (app) {
           attitude.setSmootherClass(resolveSmootherClass(options.attitudeSmootherClass));
           attLastTime = null;
           attPrevious = null;
+        }
+      }
+
+      if (needsWindShiftReset) {
+        if (windShiftFast) {
+          windShiftFast.setSmootherOptions(buildWindShiftFastOptions(options));
+          windShiftFast.setSmootherClass(resolveSmootherClass(options.windShiftFastClass));
+        }
+        if (windShiftSlow) {
+          windShiftSlow.setSmootherOptions(buildWindShiftSlowOptions(options));
+          windShiftSlow.setSmootherClass(resolveSmootherClass(options.windShiftSlowClass));
         }
       }
 
@@ -756,6 +891,9 @@ module.exports = function (app) {
         backCalcOut = null;
         groundWindIn = null;
         upwashAngle  = null;
+        windShiftFast = windShiftFast?.terminate();
+        windShiftSlow = windShiftSlow?.terminate();
+        windShift     = null;
         app.debug("plugin stopped");
         app.setPluginStatus("Stopped");
         resolve();
