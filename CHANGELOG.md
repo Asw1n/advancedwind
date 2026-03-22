@@ -52,3 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - Double correction for leeway
 - Processing data from other contexts than vessels.self and writing back to vessels.self
+
+## [2.6.0] - 2026-03-22
+### Added
+- Wind shift detection
