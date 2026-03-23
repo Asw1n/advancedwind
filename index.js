@@ -411,6 +411,8 @@ module.exports = function (app) {
     });
     sensorSpeed = new Polar(app, plugin.id, "sensorSpeed");
     sensorSpeed.setMeta({ displayName: "Speed of sensor", plane: "Boat" });
+    sensorSpeed.configureMagnitude("environment.wind.speedApparent", "", false);
+    sensorSpeed.configureAngle("environment.wind.angleApparent", "", false);
 
     // Compute sensorSpeed exactly once per attitude sample, using the correct deltaT
     // between consecutive attitude updates. This avoids the problem of calculate()
@@ -430,6 +432,7 @@ module.exports = function (app) {
     const MIN_ATT_INTERVAL = 50;
     // Keys that trigger an attitude smoother reset.
     const ATTITUDE_SMOOTHER_KEYS = ['attitudeSmootherClass', 'attitudeSmootherTau', 'attitudeSmootherTimeSpan', 'attitudeSmootherSteadyState'];
+    const isReadyAndFresh = (input) => !!input && input.ready === true && !input.stale;
     attitude.onChange = () => {
       // Apply attitude smoother settings eagerly — don't wait for calculate() (wind data).
       // Also resets derivative state to avoid a spike from the smoother discontinuity.
@@ -444,8 +447,8 @@ module.exports = function (app) {
         attPrevious = null;
         return;  // skip derivative computation this cycle
       }
+      if (!isReadyAndFresh(attitude)) return;
       const current = attitude.value;
-      if (!current) return;
       const now = Date.now();
       if (!attLastTime) {
         attLastTime = now;
@@ -699,9 +702,10 @@ module.exports = function (app) {
 
       calculatedWind.copyFrom(apparentWind);
 
+      if (!isReadyAndFresh(boatSpeedHandler)) return;
+
       // Rebuild forward-only boat speed polar (angle=0) from the handler value.
-      const bsVal = !boatSpeedHandler.stale && typeof boatSpeedHandler.value === 'number' ? boatSpeedHandler.value : 0;
-      boatSpeed.setVectorValue({ x: bsVal, y: 0 });
+      boatSpeed.setVectorValue({ x: boatSpeedHandler.value, y: 0 });
 
       // --- Misalignment ---
       misalignIn.copyFrom(calculatedWind);
@@ -713,7 +717,7 @@ module.exports = function (app) {
 
       // --- Mast rotation ---
       mastRotIn.copyFrom(calculatedWind);
-      if (options.correctForMastRotation && mast && mast.stale === false) {
+      if (options.correctForMastRotation && mast && isReadyAndFresh(mast)) {
         const mastValue = isNaN(mast.value) ? 0 : mast.value;
         calculatedWind.rotate(-mastValue);
       }
@@ -721,7 +725,7 @@ module.exports = function (app) {
 
       // --- Mast heel ---
       mastHeelIn.copyFrom(calculatedWind);
-      if (options.correctForMastHeel && attitude && attitude.stale === false) {
+      if (options.correctForMastHeel && isReadyAndFresh(attitude)) {
         calculatedWind.xValue = calculatedWind.x / Math.cos(attitude.value.pitch);
         calculatedWind.yValue = calculatedWind.y / Math.cos(attitude.value.roll);
       }
@@ -730,7 +734,7 @@ module.exports = function (app) {
       // --- Mast movement ---
       // sensorSpeed is kept current by attitude.onChange; just apply it here if enabled.
       mastMoveIn.copyFrom(calculatedWind);
-      if (options.correctForMastMovement && attitude && attitude.stale === false) {
+      if (options.correctForMastMovement && isReadyAndFresh(attitude)) {
         calculatedWind.substract(sensorSpeed);
       }
       mastMoveOut.copyFrom(calculatedWind);
@@ -748,7 +752,7 @@ module.exports = function (app) {
 
       // --- Leeway ---
       leewayIn.copyFrom(calculatedWind);
-      if (options.correctForLeeway && leewayHandler && leewayHandler.stale === false) {
+      if (options.correctForLeeway && isReadyAndFresh(leewayHandler)) {
         calculatedWind.rotate(-leewayHandler.value);
       }
       leewayOut.copyFrom(calculatedWind);
@@ -774,7 +778,7 @@ module.exports = function (app) {
 
       // --- Ground wind ---
       groundWindIn.copyFrom(calculatedWind);
-      if (options.calculateGroundWind && groundSpeed && groundSpeed.stale === false && heading && heading.stale === false) {
+      if (options.calculateGroundWind && isReadyAndFresh(groundSpeed) && isReadyAndFresh(heading)) {
         groundWind.copyFrom(calculatedWind);
         groundWind.rotate(heading.value);
         groundWind.substract(groundSpeed);
