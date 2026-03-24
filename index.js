@@ -68,23 +68,23 @@ module.exports = function (app) {
   // step is a UI hint (spinner increment) served to the webapp so controls are data-driven.
   // clampOptions() uses only min/max; step is passed through to the client unchanged.
   const paramBounds = {
-    sensorMisalignment:          { min: -Math.PI,  max:  Math.PI,   step: Math.PI/180,  default:   0,      displayFactor: 180/Math.PI },  // stored in radians, displayed in degrees
-    heightAboveWater:            { min:  0,         max:  50,       step: 0.5,  default:  15      },
-    windExponent:                { min:  0.05,      max:  0.5,      step: 0.01, default:   0.14   },
-    upwashSlope:                 { min:  0,         max:  0.3,      step: 0.01, default:   0.05   },
-    upwashOffset:                { min:  0,         max:  4,        step: 0.1,  default:   1.5    },
-    smootherTau:                 { min:  0.0,       max:  5,        step: 0.5,  default:   0.45   },
-    smootherTimeSpan:            { min:  0.05,      max:  5,        step: 0.5,  default:   2      },
-    smootherSteadyState:         { min:  0.01,      max:  0.99,     step: 0.05, default:   0.2    },
-    attitudeSmootherTau:         { min:  0.5,       max:  3,        step: 0.5,  default:   1      },
-    attitudeSmootherTimeSpan:    { min:  0.5,       max:  3,        step: 0.5,  default:   1      },
-    attitudeSmootherSteadyState: { min:  0.01,      max:  0.99,     step: 0.05, default:   0.2    },
-    windShiftFastTau:            { min:  1,         max:  600,      step: 1,    default:  5      },
-    windShiftFastTimeSpan:       { min:  1,         max:  600,      step: 1,    default:  5      },
-    windShiftFastSteadyState:    { min:  0.0001,    max:  0.9999,   step: 0.1,  default:   0.001    },
-    windShiftSlowTau:            { min:  60,        max:  3600,     step: 10,   default: 300      },
-    windShiftSlowTimeSpan:       { min:  60,        max:  3600,     step: 10,   default: 300      },
-    windShiftSlowSteadyState: { min: 0.0000001, max: 0.9999, step: 0.1, default: 0.000001   },
+    sensorMisalignment: { min: -Math.PI, max: Math.PI, step: Math.PI / 180, default: 0, displayFactor: 180 / Math.PI },  // stored in radians, displayed in degrees
+    heightAboveWater: { min: 0, max: 50, step: 0.5, default: 15 },
+    windExponent: { min: 0.05, max: 0.5, step: 0.01, default: 0.14 },
+    upwashSlope: { min: 0, max: 0.3, step: 0.01, default: 0.05 },
+    upwashOffset: { min: 0, max: 4, step: 0.1, default: 1.5 },
+    smootherTau: { min: 0.0, max: 5, step: 0.5, default: 0.45 },
+    smootherTimeSpan: { min: 0.05, max: 5, step: 0.5, default: 2 },
+    smootherSteadyState: { min: 0.01, max: 0.99, step: 0.05, default: 0.2 },
+    attitudeSmootherTau: { min: 0.5, max: 3, step: 0.5, default: 1 },
+    attitudeSmootherTimeSpan: { min: 0.5, max: 3, step: 0.5, default: 1 },
+    attitudeSmootherSteadyState: { min: 0.01, max: 0.99, step: 0.05, default: 0.2 },
+    windShiftFastTau: { min: 1, max: 600, step: 1, default: 5 },
+    windShiftFastTimeSpan: { min: 1, max: 600, step: 1, default: 5 },
+    windShiftFastSteadyState: { min: 0.0001, max: 0.9999, step: 0.1, default: 0.001 },
+    windShiftSlowTau: { min: 60, max: 3600, step: 10, default: 300 },
+    windShiftSlowTimeSpan: { min: 60, max: 3600, step: 10, default: 300 },
+    windShiftSlowSteadyState: { min: 0.0000001, max: 0.9999, step: 0.1, default: 0.000001 },
   };
 
   // Clamp a plain options object against paramBounds.
@@ -175,7 +175,7 @@ module.exports = function (app) {
   plugin.name = "Advanced Wind";
   plugin.description = "A plugin that calculates true wind while optionally correcting for vessel motion, upwash, leeway and mast height.";
   // Plugin is configured via the custom webapp (insight.html), not the Signal K admin UI.
-  plugin.schema   = {
+  plugin.schema = {
     type: "object",
     description: "Advanced Wind is configured through its own webapp. Open it from the Signal K app list (Webapps → Advanced Wind) to set sources, enable corrections and adjust parameters.",
     properties: {}
@@ -198,20 +198,20 @@ module.exports = function (app) {
   // Snapshot polars – one pair per correction step capturing calculatedWind
   // before and after each step so the webapp can display per-step before/after.
   // Steps that do not modify calculatedWind only have an *In polar.
-  let misalignIn  = null; let misalignOut  = null;
-  let mastRotIn   = null; let mastRotOut   = null;
-  let mastHeelIn  = null; let mastHeelOut  = null;
-  let mastMoveIn  = null; let mastMoveOut  = null;
-  let upwashIn    = null; let upwashOut    = null;
-  let leewayIn    = null; let leewayOut    = null;
-  let trueWindIn  = null;                          // trueWind step: no calculatedWind output
-  let heightIn    = null; let heightOut    = null; // heightIn = trueWind before scale
+  let misalignIn = null; let misalignOut = null;
+  let mastRotIn = null; let mastRotOut = null;
+  let mastHeelIn = null; let mastHeelOut = null;
+  let mastMoveIn = null; let mastMoveOut = null;
+  let upwashIn = null; let upwashOut = null;
+  let leewayIn = null; let leewayOut = null;
+  let trueWindIn = null;                          // trueWind step: no calculatedWind output
+  let heightIn = null; let heightOut = null; // heightIn = trueWind before scale
   let backCalcOut = null;                          // back-calculated apparent wind snapshot
   let groundWindIn = null;                         // groundWind step: no calculatedWind output
-  let upwashAngle  = null;                         // computed upwash angle (rad) — scalar delta
+  let upwashAngle = null;                         // computed upwash angle (rad) — scalar delta
   let windShiftFast = null;  // SmoothedAngle on environment.wind.directionTrue (fast EMA)
   let windShiftSlow = null;  // SmoothedAngle on environment.wind.directionTrue (slow EMA / reference)
-  let windShift     = null;  // inline delta: angle diff (rad) between fast and slow means
+  let windShift = null;  // inline delta: angle diff (rad) between fast and slow means
 
 
   plugin.registerWithRouter = function (router) {
@@ -306,51 +306,51 @@ module.exports = function (app) {
 
   function resolveSmootherClass(name) {
     switch (name) {
-      case 'ExponentialSmoother':   return ExponentialSmoother;
+      case 'ExponentialSmoother': return ExponentialSmoother;
       case 'MovingAverageSmoother': return MovingAverageSmoother;
-      case 'PassThroughSmoother':   return PassThroughSmoother;
+      case 'PassThroughSmoother': return PassThroughSmoother;
       case 'KalmanSmoother':
-      default:                      return KalmanSmoother;
+      default: return KalmanSmoother;
     }
   }
 
   function buildSmootherOptions(opts) {
     switch (opts.smootherClass || 'KalmanSmoother') {
-      case 'ExponentialSmoother':   return { tau:         opts.smootherTau         ?? 1    };
-      case 'MovingAverageSmoother': return { timeSpan:    opts.smootherTimeSpan    ?? 1    };
-      case 'PassThroughSmoother':   return {};
+      case 'ExponentialSmoother': return { tau: opts.smootherTau ?? 1 };
+      case 'MovingAverageSmoother': return { timeSpan: opts.smootherTimeSpan ?? 1 };
+      case 'PassThroughSmoother': return {};
       case 'KalmanSmoother':
-      default:                      return { steadyState: opts.smootherSteadyState ?? 0.3  };
+      default: return { steadyState: opts.smootherSteadyState ?? 0.3 };
     }
   }
 
   function buildAttitudeSmootherOptions(opts) {
     switch (opts.attitudeSmootherClass || 'MovingAverageSmoother') {
-      case 'ExponentialSmoother':   return { tau:         opts.attitudeSmootherTau         ?? 1   };
-      case 'PassThroughSmoother':   return {};
-      case 'KalmanSmoother':        return { steadyState: opts.attitudeSmootherSteadyState ?? 0.2 };
+      case 'ExponentialSmoother': return { tau: opts.attitudeSmootherTau ?? 1 };
+      case 'PassThroughSmoother': return {};
+      case 'KalmanSmoother': return { steadyState: opts.attitudeSmootherSteadyState ?? 0.2 };
       case 'MovingAverageSmoother':
-      default:                      return { timeSpan:    opts.attitudeSmootherTimeSpan    ?? 1   };
+      default: return { timeSpan: opts.attitudeSmootherTimeSpan ?? 1 };
     }
   }
 
   function buildWindShiftFastOptions(opts) {
     switch (opts.windShiftFastClass || 'ExponentialSmoother') {
-      case 'ExponentialSmoother':   return { tau:         opts.windShiftFastTau         ?? 30  };
-      case 'MovingAverageSmoother': return { timeSpan:    opts.windShiftFastTimeSpan    ?? 30  };
-      case 'PassThroughSmoother':   return {};
+      case 'ExponentialSmoother': return { tau: opts.windShiftFastTau ?? 30 };
+      case 'MovingAverageSmoother': return { timeSpan: opts.windShiftFastTimeSpan ?? 30 };
+      case 'PassThroughSmoother': return {};
       case 'KalmanSmoother':
-      default:                      return { steadyState: opts.windShiftFastSteadyState ?? 0.1 };
+      default: return { steadyState: opts.windShiftFastSteadyState ?? 0.1 };
     }
   }
 
   function buildWindShiftSlowOptions(opts) {
     switch (opts.windShiftSlowClass || 'ExponentialSmoother') {
-      case 'ExponentialSmoother':   return { tau:         opts.windShiftSlowTau         ?? 300  };
-      case 'MovingAverageSmoother': return { timeSpan:    opts.windShiftSlowTimeSpan    ?? 300  };
-      case 'PassThroughSmoother':   return {};
+      case 'ExponentialSmoother': return { tau: opts.windShiftSlowTau ?? 300 };
+      case 'MovingAverageSmoother': return { timeSpan: opts.windShiftSlowTimeSpan ?? 300 };
+      case 'PassThroughSmoother': return {};
       case 'KalmanSmoother':
-      default:                      return { steadyState: opts.windShiftSlowSteadyState ?? 0.02 };
+      default: return { steadyState: opts.windShiftSlowSteadyState ?? 0.02 };
     }
   }
 
@@ -366,8 +366,8 @@ module.exports = function (app) {
 
     function sendWindShiftMeta() {
       MessageHandler.sendMeta(app, plugin.id, [
-        { path: 'environment.wind.directionTrue.trend.fast',  value: { units: 'rad', description: 'Fast moving average of true wind direction', displayUnits: { category: 'angle' } } },
-        { path: 'environment.wind.directionTrue.trend.slow',  value: { units: 'rad', description: 'Slow moving average of true wind direction (reference)', displayUnits: { category: 'angle' } } },
+        { path: 'environment.wind.directionTrue.trend.fast', value: { units: 'rad', description: 'Fast moving average of true wind direction', displayUnits: { category: 'angle' } } },
+        { path: 'environment.wind.directionTrue.trend.slow', value: { units: 'rad', description: 'Slow moving average of true wind direction (reference)', displayUnits: { category: 'angle' } } },
         { path: 'environment.wind.directionTrue.trend.shift', value: { units: 'rad', description: 'Wind shift: angle difference between fast and slow mean wind directions', displayUnits: { category: 'angle' } } },
       ]);
     }
@@ -462,36 +462,36 @@ module.exports = function (app) {
       const r = options.heightAboveWater;
       sensorSpeed.setVectorValue({
         x: ((current.pitch - attPrevious.pitch) / deltaT) * r,
-        y: ((current.roll  - attPrevious.roll)  / deltaT) * r
+        y: ((current.roll - attPrevious.roll) / deltaT) * r
       });
       attPrevious = { ...current };
     };
 
     // Snapshot polars for per-step before/after inspection
-    misalignIn  = new Polar(app, plugin.id, "misalignIn");  misalignIn.setMeta({  displayName: "Before misalignment",      plane: "Boat" });
-    misalignOut = new Polar(app, plugin.id, "misalignOut"); misalignOut.setMeta({ displayName: "After misalignment",       plane: "Boat" });
-    mastRotIn   = new Polar(app, plugin.id, "mastRotIn");   mastRotIn.setMeta({   displayName: "Before mast rotation",     plane: "Boat" });
-    mastRotOut  = new Polar(app, plugin.id, "mastRotOut");  mastRotOut.setMeta({  displayName: "After mast rotation",      plane: "Boat" });
-    mastHeelIn  = new Polar(app, plugin.id, "mastHeelIn");  mastHeelIn.setMeta({  displayName: "Before mast heel",         plane: "Boat" });
-    mastHeelOut = new Polar(app, plugin.id, "mastHeelOut"); mastHeelOut.setMeta({ displayName: "After mast heel",          plane: "Boat" });
-    mastMoveIn  = new Polar(app, plugin.id, "mastMoveIn");  mastMoveIn.setMeta({  displayName: "Before mast movement",     plane: "Boat" });
-    mastMoveOut = new Polar(app, plugin.id, "mastMoveOut"); mastMoveOut.setMeta({ displayName: "After mast movement",      plane: "Boat" });
-    upwashIn    = new Polar(app, plugin.id, "upwashIn");    upwashIn.setMeta({    displayName: "Before upwash",            plane: "Boat" });
-    upwashOut   = new Polar(app, plugin.id, "upwashOut");   upwashOut.setMeta({   displayName: "After upwash",             plane: "Boat" });
-    leewayIn    = new Polar(app, plugin.id, "leewayIn");    leewayIn.setMeta({    displayName: "Before leeway",            plane: "Boat" });
-    leewayOut   = new Polar(app, plugin.id, "leewayOut");   leewayOut.setMeta({   displayName: "After leeway",             plane: "Boat" });
-    trueWindIn  = new Polar(app, plugin.id, "trueWindIn");  trueWindIn.setMeta({  displayName: "Corrected apparent wind",  plane: "Boat" });
-    heightIn    = new Polar(app, plugin.id, "heightIn");    heightIn.setMeta({    displayName: "True wind (before height norm.)", plane: "Boat" });
-    heightOut   = new Polar(app, plugin.id, "heightOut");   heightOut.setMeta({   displayName: "True wind (after height norm.)",  plane: "Boat" });
-    backCalcOut = new Polar(app, plugin.id, "backCalcOut"); backCalcOut.setMeta({ displayName: "Corrected apparent wind",  plane: "Boat" });
+    misalignIn = new Polar(app, plugin.id, "misalignIn"); misalignIn.setMeta({ displayName: "Before misalignment", plane: "Boat" });
+    misalignOut = new Polar(app, plugin.id, "misalignOut"); misalignOut.setMeta({ displayName: "After misalignment", plane: "Boat" });
+    mastRotIn = new Polar(app, plugin.id, "mastRotIn"); mastRotIn.setMeta({ displayName: "Before mast rotation", plane: "Boat" });
+    mastRotOut = new Polar(app, plugin.id, "mastRotOut"); mastRotOut.setMeta({ displayName: "After mast rotation", plane: "Boat" });
+    mastHeelIn = new Polar(app, plugin.id, "mastHeelIn"); mastHeelIn.setMeta({ displayName: "Before mast heel", plane: "Boat" });
+    mastHeelOut = new Polar(app, plugin.id, "mastHeelOut"); mastHeelOut.setMeta({ displayName: "After mast heel", plane: "Boat" });
+    mastMoveIn = new Polar(app, plugin.id, "mastMoveIn"); mastMoveIn.setMeta({ displayName: "Before mast movement", plane: "Boat" });
+    mastMoveOut = new Polar(app, plugin.id, "mastMoveOut"); mastMoveOut.setMeta({ displayName: "After mast movement", plane: "Boat" });
+    upwashIn = new Polar(app, plugin.id, "upwashIn"); upwashIn.setMeta({ displayName: "Before upwash", plane: "Boat" });
+    upwashOut = new Polar(app, plugin.id, "upwashOut"); upwashOut.setMeta({ displayName: "After upwash", plane: "Boat" });
+    leewayIn = new Polar(app, plugin.id, "leewayIn"); leewayIn.setMeta({ displayName: "Before leeway", plane: "Boat" });
+    leewayOut = new Polar(app, plugin.id, "leewayOut"); leewayOut.setMeta({ displayName: "After leeway", plane: "Boat" });
+    trueWindIn = new Polar(app, plugin.id, "trueWindIn"); trueWindIn.setMeta({ displayName: "Corrected apparent wind", plane: "Boat" });
+    heightIn = new Polar(app, plugin.id, "heightIn"); heightIn.setMeta({ displayName: "True wind (before height norm.)", plane: "Boat" });
+    heightOut = new Polar(app, plugin.id, "heightOut"); heightOut.setMeta({ displayName: "True wind (after height norm.)", plane: "Boat" });
+    backCalcOut = new Polar(app, plugin.id, "backCalcOut"); backCalcOut.setMeta({ displayName: "Corrected apparent wind", plane: "Boat" });
     groundWindIn = new Polar(app, plugin.id, "groundWindIn"); groundWindIn.setMeta({ displayName: "Corrected apparent wind", plane: "Boat" });
 
     // Configure SK paths for intermediate polars so the webapp can read unit
     // metadata (units, displayUnits) from SK for correct value formatting.
     // These polars are never subscribed — paths are metadata-only references.
     for (const p of [misalignIn, misalignOut, mastRotIn, mastRotOut, mastHeelIn, mastHeelOut,
-                     mastMoveIn, mastMoveOut, upwashIn, upwashOut, leewayIn, leewayOut,
-                     trueWindIn, backCalcOut, groundWindIn]) {
+      mastMoveIn, mastMoveOut, upwashIn, upwashOut, leewayIn, leewayOut,
+      trueWindIn, backCalcOut, groundWindIn]) {
       p.configureMagnitude("environment.wind.speedApparent", "", false);
       p.configureAngle("environment.wind.angleApparent", "", false);
     }
@@ -602,25 +602,25 @@ module.exports = function (app) {
     // source: plugin.id ensures only this plugin's groundWind deltas are accepted.
     windShiftFast = new SmoothedAngle(app, 'windShiftFastInternal', 'windShiftFast',
       'environment.wind.directionTrue', {
-        source: plugin.id,
-        passOn: true,
-        angleRange: '0to2pi',
-        meta: { displayName: 'Fast mean wind direction', plane: 'Ground' },
-        SmootherClass: resolveSmootherClass(options.windShiftFastClass),
-        smootherOptions: buildWindShiftFastOptions(options),
-      }
+      source: plugin.id,
+      passOn: true,
+      angleRange: '0to2pi',
+      meta: { displayName: 'Fast mean wind direction', plane: 'Ground' },
+      SmootherClass: resolveSmootherClass(options.windShiftFastClass),
+      smootherOptions: buildWindShiftFastOptions(options),
+    }
     );
     windShiftFast.id = 'windShiftFast';
 
     windShiftSlow = new SmoothedAngle(app, 'windShiftSlowInternal', 'windShiftSlow',
       'environment.wind.directionTrue', {
-        source: plugin.id,
-        passOn: true,
-        angleRange: '0to2pi',
-        meta: { displayName: 'Slow mean wind direction (reference)', plane: 'Ground' },
-        SmootherClass: resolveSmootherClass(options.windShiftSlowClass),
-        smootherOptions: buildWindShiftSlowOptions(options),
-      }
+      source: plugin.id,
+      passOn: true,
+      angleRange: '0to2pi',
+      meta: { displayName: 'Slow mean wind direction (reference)', plane: 'Ground' },
+      SmootherClass: resolveSmootherClass(options.windShiftSlowClass),
+      smootherOptions: buildWindShiftSlowOptions(options),
+    }
     );
     windShiftSlow.id = 'windShiftSlow';
 
@@ -646,11 +646,13 @@ module.exports = function (app) {
       windShift.stale = false;
       app.handleMessage(plugin.id, {
         context: 'vessels.self',
-        updates: [{ $source: plugin.id, values: [
-          { path: 'environment.wind.directionTrue.trend.fast',  value: fast },
-          { path: 'environment.wind.directionTrue.trend.slow',  value: slow },
-          { path: 'environment.wind.directionTrue.trend.shift', value: windShift.value },
-        ]}]
+        updates: [{
+          $source: plugin.id, values: [
+            { path: 'environment.wind.directionTrue.trend.fast', value: fast },
+            { path: 'environment.wind.directionTrue.trend.slow', value: slow },
+            { path: 'environment.wind.directionTrue.trend.shift', value: windShift.value },
+          ]
+        }]
       });
     };
 
@@ -669,15 +671,15 @@ module.exports = function (app) {
     reportFull.addPolar(groundSpeed);
     reportFull.addPolar(groundWind);
     // Snapshot polars
-    reportFull.addPolar(misalignIn);  reportFull.addPolar(misalignOut);
-    reportFull.addPolar(mastRotIn);   reportFull.addPolar(mastRotOut);
-    reportFull.addPolar(mastHeelIn);  reportFull.addPolar(mastHeelOut);
-    reportFull.addPolar(mastMoveIn);  reportFull.addPolar(mastMoveOut);
+    reportFull.addPolar(misalignIn); reportFull.addPolar(misalignOut);
+    reportFull.addPolar(mastRotIn); reportFull.addPolar(mastRotOut);
+    reportFull.addPolar(mastHeelIn); reportFull.addPolar(mastHeelOut);
+    reportFull.addPolar(mastMoveIn); reportFull.addPolar(mastMoveOut);
     reportFull.addPolar(sensorSpeed);
-    reportFull.addPolar(upwashIn);    reportFull.addPolar(upwashOut);  reportFull.addDelta(upwashAngle);
-    reportFull.addPolar(leewayIn);    reportFull.addPolar(leewayOut);
+    reportFull.addPolar(upwashIn); reportFull.addPolar(upwashOut); reportFull.addDelta(upwashAngle);
+    reportFull.addPolar(leewayIn); reportFull.addPolar(leewayOut);
     reportFull.addPolar(trueWindIn);
-    reportFull.addPolar(heightIn);    reportFull.addPolar(heightOut);
+    reportFull.addPolar(heightIn); reportFull.addPolar(heightOut);
     reportFull.addPolar(backCalcOut);
     reportFull.addPolar(groundWindIn);
     // Wind shift
@@ -702,10 +704,12 @@ module.exports = function (app) {
 
       calculatedWind.copyFrom(apparentWind);
 
-      if (!isReadyAndFresh(boatSpeedHandler)) return;
-
       // Rebuild forward-only boat speed polar (angle=0) from the handler value.
-      boatSpeed.setVectorValue({ x: boatSpeedHandler.value, y: 0 });
+      if (boatSpeedHandler.ready)
+        boatSpeed.setVectorValue({ x: boatSpeedHandler.value, y: 0 });
+      else
+        boatSpeed.invalidate();
+
 
       // --- Misalignment ---
       misalignIn.copyFrom(calculatedWind);
@@ -717,7 +721,7 @@ module.exports = function (app) {
 
       // --- Mast rotation ---
       mastRotIn.copyFrom(calculatedWind);
-      if (options.correctForMastRotation && mast && isReadyAndFresh(mast)) {
+      if (options.correctForMastRotation && mast && mast.ready) {
         const mastValue = isNaN(mast.value) ? 0 : mast.value;
         calculatedWind.rotate(-mastValue);
       }
@@ -725,7 +729,7 @@ module.exports = function (app) {
 
       // --- Mast heel ---
       mastHeelIn.copyFrom(calculatedWind);
-      if (options.correctForMastHeel && isReadyAndFresh(attitude)) {
+      if (options.correctForMastHeel && attitude.ready) {
         calculatedWind.xValue = calculatedWind.x / Math.cos(attitude.value.pitch);
         calculatedWind.yValue = calculatedWind.y / Math.cos(attitude.value.roll);
       }
@@ -734,7 +738,7 @@ module.exports = function (app) {
       // --- Mast movement ---
       // sensorSpeed is kept current by attitude.onChange; just apply it here if enabled.
       mastMoveIn.copyFrom(calculatedWind);
-      if (options.correctForMastMovement && isReadyAndFresh(attitude)) {
+      if (options.correctForMastMovement && attitude.ready) {
         calculatedWind.substract(sensorSpeed);
       }
       mastMoveOut.copyFrom(calculatedWind);
@@ -744,7 +748,6 @@ module.exports = function (app) {
       // Always compute the angle for display (even when correction is disabled).
       const computedUpwash = approximateUpwash(calculatedWind.angle);
       upwashAngle.value = computedUpwash;
-      upwashAngle.stale = false;
       if (options.correctForUpwash) {
         calculatedWind.rotate(-computedUpwash);
       }
@@ -752,19 +755,22 @@ module.exports = function (app) {
 
       // --- Leeway ---
       leewayIn.copyFrom(calculatedWind);
-      if (options.correctForLeeway && isReadyAndFresh(leewayHandler)) {
+      if (options.correctForLeeway && leewayHandler && leewayHandler.ready) {
         calculatedWind.rotate(-leewayHandler.value);
       }
       leewayOut.copyFrom(calculatedWind);
 
       // --- True wind (always active; no calculatedWind output) ---
-      trueWindIn.copyFrom(calculatedWind);
-      trueWind.copyFrom(calculatedWind);
-      trueWind.substract(boatSpeed);
+      if (boatSpeed.ready) {
+        trueWindIn.copyFrom(calculatedWind);
+        trueWind.copyFrom(calculatedWind);
+        trueWind.substract(boatSpeed);
+      }
+      else trueWind.invalidate();
 
-      // --- Height / wind gradient ---
-      heightIn.copyFrom(trueWind);
-      if (options.correctForHeight) {
+        // --- Height / wind gradient ---
+        heightIn.copyFrom(trueWind);
+      if (options.correctForHeight && trueWind.ready) {
         trueWind.scale(approximateWindGradient());
         calculatedWind.copyFrom(trueWind);
         calculatedWind.add(boatSpeed);
@@ -778,11 +784,12 @@ module.exports = function (app) {
 
       // --- Ground wind ---
       groundWindIn.copyFrom(calculatedWind);
-      if (options.calculateGroundWind && isReadyAndFresh(groundSpeed) && isReadyAndFresh(heading)) {
+      if (options.calculateGroundWind && groundSpeed.ready && heading.ready) {
         groundWind.copyFrom(calculatedWind);
         groundWind.rotate(heading.value);
         groundWind.substract(groundSpeed);
       }
+      else groundWind.invalidate();
 
       // Build outputs to send based on current options
       const outputsToSend = [];
@@ -929,20 +936,20 @@ module.exports = function (app) {
         leewayHandler = leewayHandler?.terminate(app);
         boatSpeed = null;
         groundSpeed = groundSpeed?.terminate(app);
-        misalignIn = null;  misalignOut = null;
-        mastRotIn  = null;  mastRotOut  = null;
-        mastHeelIn = null;  mastHeelOut = null;
-        mastMoveIn = null;  mastMoveOut = null;
-        upwashIn   = null;  upwashOut   = null;
-        leewayIn   = null;  leewayOut   = null;
+        misalignIn = null; misalignOut = null;
+        mastRotIn = null; mastRotOut = null;
+        mastHeelIn = null; mastHeelOut = null;
+        mastMoveIn = null; mastMoveOut = null;
+        upwashIn = null; upwashOut = null;
+        leewayIn = null; leewayOut = null;
         trueWindIn = null;
-        heightIn   = null;  heightOut   = null;
+        heightIn = null; heightOut = null;
         backCalcOut = null;
         groundWindIn = null;
-        upwashAngle  = null;
+        upwashAngle = null;
         windShiftFast = windShiftFast?.terminate();
         windShiftSlow = windShiftSlow?.terminate();
-        windShift     = null;
+        windShift = null;
         app.debug("plugin stopped");
         app.setPluginStatus("Stopped");
         resolve();
