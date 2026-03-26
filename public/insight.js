@@ -492,6 +492,11 @@ const stepConfigs = {
         items.push({ type: "polar", id: "backCalcOut" });
       if (cfg.calculateGroundWind)
         items.push({ type: "polar", id: "groundWind" });
+      if (cfg.detectWindShift) {
+        items.push({ type: "delta", id: "windShiftFast" });
+        items.push({ type: "delta", id: "windShiftSlow" });
+        items.push({ type: "delta", id: "windShift" });
+      }
       return items;
     }
   },
@@ -753,7 +758,7 @@ function createDataTable(items) {
   items.forEach(item => {
     const data = getStateItem(item);
     const row  = table.insertRow();
-    if (isStale(data)) row.className = "stale";
+    if (isNotReady(data)) row.className = "not-ready";
     const nameCell = row.insertCell();
     nameCell.textContent = meta[item.id]?.displayName ?? item.id;
     const valCell = row.insertCell();
@@ -863,28 +868,17 @@ function createParamControl(key, meta, value, readOnly) {
   return container;
 }
 
-// Return true if a state item is considered stale / unavailable.
-function isStale(data) {
+// Return true if a state item is not ready (absent or state.ready !== true).
+function isNotReady(data) {
   if (!data) return true;
-  if (data.state?.stale === true) return true;
-  return false;
+  return data.state?.ready !== true;
 }
 
-// Collect human-readable reasons why a correction cannot currently be activated.
+// Collect human-readable reasons why a correction step's parameters are invalid.
+// Input readiness is checked separately in renderPanelLive for all steps.
 function getCannotActivateReasons(cfg) {
   const reasons = [];
   if (!cfg.correctionFlag) return reasons;
-
-  // Check required input state items (polars, deltas, attitudes).
-  (cfg.inputs || []).forEach(item => {
-    const data = getStateItem(item);
-    if (!data) {
-      reasons.push(`No data available for "${item.id}"`);
-    } else if (isStale(data)) {
-      const label = meta[item.id]?.displayName ?? item.id;
-      reasons.push(`"${label}" data is stale or missing`);
-    }
-  });
 
   // Check required parameters: numbers must be finite, non-source strings must be non-empty.
   (cfg.parameters || []).forEach(entry => {
@@ -1045,45 +1039,30 @@ function renderPanelLive(step) {
     outputsEl.appendChild(createDataTable(cfgOutputs));
   }
 
-  // 7. Warnings
+  // 7. Warnings — check all configured inputs for readiness across all steps.
   warningsEl.innerHTML = "";
+  const notReadyReasons = [];
+  (cfgInputs || []).forEach(item => {
+    const data = getStateItem(item);
+    if (isNotReady(data)) {
+      const label = meta[item.id]?.displayName ?? item.id;
+      notReadyReasons.push(`"${label}" — not available`);
+    }
+  });
+  // For correction steps also validate required parameters.
   if (cfg && cfg.correctionFlag) {
-    // Correction steps: show reasons the correction cannot run.
-    const reasons = getCannotActivateReasons(cfg);
-    if (reasons.length > 0) {
-      warningsEl.appendChild(sceneSectionHeading("Missing"));
-      const list = document.createElement("ul");
-      list.className = "list-unstyled text-danger small ps-3";
-      reasons.forEach(r => {
-        const li = document.createElement("li");
-        li.textContent = r;
-        list.appendChild(li);
-      });
-      warningsEl.appendChild(list);
-    }
-  } else if (cfgInputs && cfgInputs.length > 0) {
-    // Non-correction steps (e.g. overview): list any stale or missing inputs.
-    const missing = [];
-    cfgInputs.forEach(item => {
-      const data = getStateItem(item);
-      if (!data) {
-        missing.push(`"${item.id}" — no data available`);
-      } else if (isStale(data)) {
-        const label = meta[item.id]?.displayName ?? item.id;
-        missing.push(`"${label}" — data is stale or missing`);
-      }
+    notReadyReasons.push(...getCannotActivateReasons(cfg));
+  }
+  if (notReadyReasons.length > 0) {
+    warningsEl.appendChild(sceneSectionHeading("Warnings"));
+    const list = document.createElement("ul");
+    list.className = "list-unstyled text-danger small ps-3";
+    notReadyReasons.forEach(r => {
+      const li = document.createElement("li");
+      li.textContent = r;
+      list.appendChild(li);
     });
-    if (missing.length > 0) {
-      warningsEl.appendChild(sceneSectionHeading("Missing:"));
-      const list = document.createElement("ul");
-      list.className = "list-unstyled text-danger small ps-3";
-      missing.forEach(r => {
-        const li = document.createElement("li");
-        li.textContent = r;
-        list.appendChild(li);
-      });
-      warningsEl.appendChild(list);
-    }
+    warningsEl.appendChild(list);
   }
 }
 
