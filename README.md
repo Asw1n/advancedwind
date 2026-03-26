@@ -75,6 +75,16 @@ Ground wind effectively is wind over water corrected for current. However curren
 To calculate ground wind the plugin uses the paths navigation.speedOverGround, navigation.courseOverGroundTrue and navigation.headingTrue.
 Ground wind is written to the paths environment.wind.speedOverGround and environment.wind.directionTrue.
 
+### Wind shift detection
+The plugin can optionally detect wind shifts based on ground wind direction. It does this by maintaining two moving averages of true wind direction: a fast one that tracks recent wind and a slow one that acts as a reference. The difference between them is the wind shift angle.
+
+Three values are published to SignalK:
+- `environment.wind.directionTrue.trend.fast` — fast moving average of true wind direction
+- `environment.wind.directionTrue.trend.slow` — slow moving average of true wind direction (reference)
+- `environment.wind.directionTrue.trend.shift` — wind shift angle (difference between fast and slow)
+
+The smoothing method and smoother setings for the fast and slow averages are independently configurable in the webapp.
+
 ## Data smoothing
 All inputs can be smoothed before being used in calculations. Four smoother types are available and can be selected in the webapp:
 - **Kalman filter** — balances noise rejection and responsiveness dynamically. Tune with the *Kalman gain* (0 = ignore sensor completely, 1 = trust sensor fully).
@@ -95,6 +105,7 @@ The webapp has a sidebar with a step for each stage of the calculation pipeline:
 - **Height / 10 m** — wind gradient normalisation to a 10 m reference height.
 - **Back Calc AW** — the back-calculated apparent wind.
 - **Ground Wind** — the wind over ground calculation.
+- **Wind Shift** — wind shift detection, showing fast and slow trend directions and the resulting shift angle.
 
 Each step shows a live vector diagram of the relevant wind and vessel vectors, a table of input and output values with units and data-quality indicators, and controls to enable or disable the correction and adjust its parameters. Read more in the [webapp README](public/README.md).
 

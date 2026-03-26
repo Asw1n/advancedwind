@@ -55,4 +55,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [2.6.0] - 2026-03-22
 ### Added
-- Wind shift detection
+- Windshift detection based on comparision between slow and fast moving wind trends
+- Windshift presentation in webApp
+
+## [2.6.3] - 2026-03-26
+
+### Fixed
+- Better handling of edge cases in the calculation pipeline
+- bug regarding population of source selection list

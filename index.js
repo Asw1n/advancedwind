@@ -177,7 +177,7 @@ module.exports = function (app) {
   // Plugin is configured via the custom webapp (insight.html), not the Signal K admin UI.
   plugin.schema = {
     type: "object",
-    description: "Advanced Wind is configured through its own webapp. Open it from the Signal K app list (Webapps → Advanced Wind) to set sources, enable corrections and adjust parameters.",
+    description: "Advanced Wind is configured through its webapp. Open it from the Signal K app list (Webapps → Advanced Wind) to set sources, enable corrections and adjust parameters.",
     properties: {}
   };
   plugin.uiSchema = {};
@@ -368,7 +368,7 @@ module.exports = function (app) {
       MessageHandler.sendMeta(app, plugin.id, [
         { path: 'environment.wind.directionTrue.trend.fast', value: { units: 'rad', description: 'Fast moving average of true wind direction', displayUnits: { category: 'angle' } } },
         { path: 'environment.wind.directionTrue.trend.slow', value: { units: 'rad', description: 'Slow moving average of true wind direction (reference)', displayUnits: { category: 'angle' } } },
-        { path: 'environment.wind.directionTrue.trend.shift', value: { units: 'rad', description: 'Wind shift: angle difference between fast and slow mean wind directions', displayUnits: { category: 'angle' } } },
+        { path: 'environment.wind.directionTrue.trend.shift', value: { units: 'rad', displayName: 'Wind Shift', description: 'Wind shift: angle difference between fast and slow mean wind directions', displayUnits: { category: 'angle' } } },
       ]);
     }
     let SmootherClass = resolveSmootherClass(options.smootherClass);
@@ -605,7 +605,7 @@ module.exports = function (app) {
       source: plugin.id,
       passOn: true,
       angleRange: '0to2pi',
-      meta: { displayName: 'Fast mean wind direction', plane: 'Ground' },
+      meta: { displayName: 'Fast mean wind direction', plane: 'Ground', units: 'rad', displayUnits: { category: 'angle' } },
       SmootherClass: resolveSmootherClass(options.windShiftFastClass),
       smootherOptions: buildWindShiftFastOptions(options),
     }
@@ -617,21 +617,16 @@ module.exports = function (app) {
       source: plugin.id,
       passOn: true,
       angleRange: '0to2pi',
-      meta: { displayName: 'Slow mean wind direction (reference)', plane: 'Ground' },
+      meta: { displayName: 'Slow mean wind direction (reference)', plane: 'Ground', units: 'rad', displayUnits: { category: 'angle' } },
       SmootherClass: resolveSmootherClass(options.windShiftSlowClass),
       smootherOptions: buildWindShiftSlowOptions(options),
     }
     );
     windShiftSlow.id = 'windShiftSlow';
 
-    windShift = {
-      id: 'windShift',
-      value: null,
-      stale: true,
-      meta: { displayName: 'Wind Shift', units: 'rad' },
-      get state() { return { stale: this.stale, frequency: null, sources: [] }; },
-      report() { return { id: this.id, value: this.value, state: this.state }; }
-    };
+    windShift = new MessageHandler(app, plugin.id, 'windShift');
+    windShift.configure('environment.wind.directionTrue.trend.shift', '', false);
+    MessageHandler.setMeta(app, plugin.in, 'environment.wind.directionTrue.trend.shift', { displayName: 'Wind Shift', description: 'Wind shift: angle difference between fast and slow mean wind directions', plane: 'Ground', units: 'rad', displayUnits: { category: 'angle' } });
 
     if (options.detectWindShift) sendWindShiftMeta();
 
@@ -643,7 +638,6 @@ module.exports = function (app) {
       if (typeof fast !== 'number' || typeof slow !== 'number') return;
       const raw = fast - slow;
       windShift.value = ((raw + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
-      windShift.stale = false;
       app.handleMessage(plugin.id, {
         context: 'vessels.self',
         updates: [{
@@ -949,7 +943,7 @@ module.exports = function (app) {
         upwashAngle = null;
         windShiftFast = windShiftFast?.terminate();
         windShiftSlow = windShiftSlow?.terminate();
-        windShift = null;
+        windShift = windShift?.terminate();
         app.debug("plugin stopped");
         app.setPluginStatus("Stopped");
         resolve();

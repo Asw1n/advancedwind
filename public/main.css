@@ -102,3 +102,6 @@ line { stroke-width: 2; }
 .card-header #panel-enable .switch {
   margin: 0;
 }
+
+/* --- Not-ready data rows -------------------------------------------------- */
+tr.not-ready td { color: #aaa; font-style: italic; }

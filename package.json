@@ -1,7 +1,7 @@
 {
   "name": "advancedwind",
-  "version": "2.6.1",
-  "description": "A plugin that calculates true wind and ground wind optionally correcting for vessel motion, upwash, leeway and mast height.",
+  "version": "2.6.3",
+  "description": "Calculates true wind, ground wind and wind shifts while correcting for sensor misalignment, rotating mast,vessel motion, upwash, leeway and mast height.",
   "main": "index.js",
   "exports": {
     ".": "./index.js"
@@ -38,9 +38,9 @@
   "signalk-plugin-enabled-by-default": false,
   "signalk": {
     "appIcon": "./icon.png",
-    "displayName": "Advanced wind"
+    "displayName": "Advanced Wind"
   },
   "dependencies": {
-    "signalkutilities": "1.9.1"
+    "signalkutilities": "1.11.0"
   }
 }
