@@ -361,6 +361,7 @@ module.exports = function (app) {
     // can be picked up by the calculation logic. Guard against
     // non-object values coming from a corrupted configuration file.
     readOptions();
+    const STATIONARY_SOG_THRESHOLD = 0.257; // m/s ≈ 0.5 kn — boat considered stationary
     const outputs = [];
     reportFull = new Reporter();
 
@@ -782,6 +783,14 @@ module.exports = function (app) {
         groundWind.copyFrom(calculatedWind);
         groundWind.rotate(heading.value);
         groundWind.substract(groundSpeed);
+      }
+      else if (options.calculateGroundWind && !groundSpeed.ready && heading.ready &&
+               groundSpeed.polar.magnitudeHandler.ready &&
+               groundSpeed.polar.magnitudeHandler.value <= STATIONARY_SOG_THRESHOLD) {
+        // Boat is stationary: SOG is available and near zero but COG is stale,
+        // so the groundSpeed smoother isn't ready. Skip the vector subtraction.
+        groundWind.copyFrom(calculatedWind);
+        groundWind.rotate(heading.value);
       }
       else groundWind.invalidate();
 
