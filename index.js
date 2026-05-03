@@ -2,7 +2,7 @@ const { Polar, PolarSmoother, SmoothedAngle, Reporter, ExponentialSmoother, Movi
 const path = require('path');
 
 module.exports = function (app) {
-  const currentVersion = "3.2";
+  const currentVersion = "3.3";
 
   let options = {};
   let changedOptions = {};
@@ -152,6 +152,12 @@ module.exports = function (app) {
       options = { ...defaultOptions, ...temp };
       options.sensorMisalignment = (options.sensorMisalignment || 0) * Math.PI / 180;
       options = clampOptions(options);
+      options.version = currentVersion;
+      saveOptions();
+      return;
+    }
+    else if (temp.version === "3.2") {
+      options = clampOptions({ ...defaultOptions, ...temp });
       options.version = currentVersion;
       saveOptions();
       return;
