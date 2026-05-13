@@ -64,13 +64,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Better handling of edge cases in the calculation pipeline
 - bug regarding population of source selection list
 
+## [2.6.5] - 2026-05-14
+
+### Fixed
+- Wind shift detection broken when staleness detection was enabled: `windShiftFast`/`windShiftSlow` were included in `applyStalenessDetection()`, which overwrote the fixed magnitude handler's intentional `stalenessDetection=false`, making it immediately stale and silencing the `onChange` callback
+
 ## [2.6.4] - 2026-05-14
 
 ### Added
 - Optional staleness detection
 - More precise warnings regarding the state of inputs
-
-### Fixed
-- Wind shift detection broken when staleness detection was enabled: `windShiftFast`/`windShiftSlow` were included in `applyStalenessDetection()`, which overwrote the fixed magnitude handler's intentional `stalenessDetection=false`, making it immediately stale and silencing the `onChange` callback
 
 
