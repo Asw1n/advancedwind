@@ -107,7 +107,7 @@ The webapp has a sidebar with a step for each stage of the calculation pipeline:
 - **Ground Wind** — the wind over ground calculation.
 - **Wind Shift** — wind shift detection, showing fast and slow trend directions and the resulting shift angle.
 
-Each step shows a live vector diagram of the relevant wind and vessel vectors, a table of input and output values with units and data-quality indicators, and controls to enable or disable the correction and adjust its parameters. Read more in the [webapp README](public/README.md).
+Each step shows a live vector diagram of the relevant wind and vessel vectors, a table of input and output values with units and data-quality indicators, and controls to enable or disable the correction and adjust its parameters.
 
 ## Some considerations
 - Some wind sensors or instrument systems are able to apply heel correction or mast movement correction. In that case make sure that the same corrections is not made twice.

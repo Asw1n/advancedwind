@@ -1,5 +1,4 @@
 const { Polar, PolarSmoother, SmoothedAngle, Reporter, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother, PassThroughSmoother, MessageSmoother, MessageHandler, createSmoothedPolar, createSmoothedHandler } = require('signalkutilities');
-const path = require('path');
 
 module.exports = function (app) {
   const currentVersion = "3.3";
@@ -29,6 +28,9 @@ module.exports = function (app) {
     'windExponent': 0.14,
     'upwashSlope': 0.05,
     'upwashOffset': 1.5,
+
+    // Staleness detection
+    'stalenessDetection': true,
 
     // Smoother
     'smootherClass': 'ExponentialSmoother',
@@ -515,7 +517,7 @@ module.exports = function (app) {
       value: null,
       stale: true,
       meta: { displayName: "Calculated upwash", units: "rad" },
-      get state() { return { stale: this.stale, frequency: null, sources: [] }; },
+      get state() { return { isStale: this.stale, frequency: null, sources: [] }; },
       report() {
         return { id: this.id, value: this.value, state: this.state };
       }
@@ -692,6 +694,19 @@ module.exports = function (app) {
     apparentWind.onChange = () => {
       calculate();
     };
+
+    // Apply staleness detection setting to all subscribing instances.
+    // A single assignment on each outermost smoother propagates to its wrapped handler(s).
+    // windShiftFast/windShiftSlow are SmoothedAngle instances that internally use a fixed
+    // magnitude handler (value=1, never subscribed) with stalenessDetection=false by design.
+    // Propagating stalenessDetection to them would overwrite that and make the magnitude
+    // handler stale immediately (timestamp=null), breaking polar.ready and silencing onChange.
+    function applyStalenessDetection(val) {
+      for (const inst of [heading, mast, attitude, apparentWind, boatSpeedHandler, leewayHandler, groundSpeed]) {
+        if (inst) inst.stalenessDetection = val;
+      }
+    }
+    applyStalenessDetection(options.stalenessDetection ?? true);
 
     isRunning = true;
     app.debug("Start wind calculations");
@@ -873,6 +888,9 @@ module.exports = function (app) {
           case 'attitudeSmootherTimeSpan':
           case 'attitudeSmootherSteadyState':
             needsSmootherReset = true;
+            break;
+          case 'stalenessDetection':
+            applyStalenessDetection(value);
             break;
           case 'detectWindShift':
             if (value) sendWindShiftMeta();

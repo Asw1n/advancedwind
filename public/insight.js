@@ -434,6 +434,7 @@ const paramMeta = {
   rotationPath:                { label: "Mast rotation path",                                            unit: "",  type: "string" },
   rotationSource:              { label: "Mast rotation source", path: "(see rotation path above)",       unit: "",  type: "string", sourceOf: { type: "delta",    id: "mast.smoothed" } },
   groundSpeedSource:           { label: "Ground speed source",  path: "navigation.speedOverGround",      unit: "",  type: "string", sourceOf: { type: "polar",    id: "groundSpeed.smoothed" } },
+  stalenessDetection:          { label: "Staleness detection",                                           unit: "",  type: "boolean" },
   calculateGroundWind:         { label: "Calculate Wind direction",                                      unit: "",  type: "boolean" },
   backCalculateApparentWind:   { label: "Back-calculate apparent wind",                                  unit: "",  type: "boolean" },
   preventDuplication:          { label: "Replace apparent wind (prevent duplication)",                   unit: "",  type: "boolean" },
@@ -517,6 +518,7 @@ const stepConfigs = {
       { key: "smootherTimeSpan",            showIf: cfg => (cfg.smootherClass || "ExponentialSmoother") === "MovingAverageSmoother" },
       { key: "smootherSteadyState",         showIf: cfg => (cfg.smootherClass || "ExponentialSmoother") === "KalmanSmoother" },
       // PassThroughSmoother has no parameters — nothing extra to show.
+      "stalenessDetection",
     ],
     inputs: [
       { type: "polar",    id: "apparentWind.smoothed" },
@@ -874,6 +876,31 @@ function isNotReady(data) {
   return data.state?.ready !== true;
 }
 
+// Return a human-readable reason why a state item is not ready.
+// Inspects the new state fields (subscribed, pathKnown, hasDelta, isStale) from
+// signalkutilities. For smoothers these fields live under handler/magnitude/angle;
+// for plain Polars they are at the top level.
+function getNotReadyReason(data) {
+  const s = data?.state;
+  if (!s) return "no data";
+
+  // Collect the sub-states that carry subscribed/pathKnown.
+  // MessageSmoother / SmoothedAngle → s.handler
+  // PolarSmoother → s.magnitude + s.angle
+  // Plain Polar / MessageHandler → s itself
+  const handlerStates = [];
+  if (s.handler)    handlerStates.push(s.handler);
+  if (s.magnitude)  handlerStates.push(s.magnitude);
+  if (s.angle)      handlerStates.push(s.angle);
+  if (handlerStates.length === 0) handlerStates.push(s);
+
+  if (handlerStates.some(h => h.subscribed === false))  return "not subscribed to Signal K";
+  if (handlerStates.some(h => h.pathKnown  === false))  return "path not found in Signal K";
+  if (s.hasDelta === false)                             return "waiting for first data";
+  if (s.isStale  === true)                              return "data is stale";
+  return "not available";
+}
+
 // Collect human-readable reasons why a correction step's parameters are invalid.
 // Input readiness is checked separately in renderPanelLive for all steps.
 function getCannotActivateReasons(cfg) {
@@ -1046,7 +1073,7 @@ function renderPanelLive(step) {
     const data = getStateItem(item);
     if (isNotReady(data)) {
       const label = meta[item.id]?.displayName ?? item.id;
-      notReadyReasons.push(`"${label}" — not available`);
+      notReadyReasons.push(`"${label}" — ${getNotReadyReason(data)}`);
     }
   });
   // For correction steps also validate required parameters.
