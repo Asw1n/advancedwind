@@ -1,127 +1,179 @@
-﻿# Advanced wind  Plugin for SignalK
+# Advanced Wind — SignalK Plugin
 
-## Function and goal of the plugin
-The Advanced wind plugin is a plugin for SignalK server that calculates true wind from wind sensor data and paddle wheel data. It also calculates ground wind using GPS and compass data.
+Advanced Wind is a SignalK server plugin that calculates true wind, back-calculated apparent wind, and ground wind from your boat's sensor data. Beyond a basic true-wind calculation it applies a chain of optional, individually tunable corrections that improve the quality of the result. The built-in webapp lets you inspect each step of the calculation live and change every setting while the plugin is running.
 
-The goal of the plugin is to supply the best possible approximation of wind speed. To improve the wind speed calculation the plugin can make several corrections. Each individual correction is optional and most can be parameterised. The plugin can therefore be tuned to the boat's characteristics. The corrections will be discussed in more detail later on.
+---
 
-## Configuration
-The plugin is configured through its own webapp — **Advanced Wind Insight** — accessible under Webapps in the SignalK dashboard. All corrections, parameters, data sources and smoother settings can be changed live while the plugin is running. The SignalK admin plugin settings page is intentionally left empty; use the webapp instead.
+## Why use this plugin instead of Derived Data?
 
-## About wind
-Wind is the driving force of a sailing vessel. Therefore reliable wind information is important to all sailors. For performance sailors and racers this if even more true as reliable wind information allows them to compare the performance of their vessel to a maximum theoretical performance given in theis vessels polar data.
-Wind has two important elements: speed and direction. Another important aspect is the frame of reference from which the wind is experienced. Wind seems stronger  on a moving vessel than on a anchored vessel. There are three commonly known frames of reference when dealing with wind. The first frame of reference is the vessel itself, this is the wind as it is perceived by a person on the vessel. This is commonly called the apparent wind. The second frame of reference is the wind as it would be perceived from an object floating on the water. This wind is called wind over water or true wind. The third frame of reference is the ground. This is the wind one would feel standing on a small island in the water. This is called wind over ground or ground wind. 
-Each of these three winds are important to a sailor, although for different reasons:
-- Apparent wind is important for trimming the sails. 
-- True wind is important for determining when to tack or gibe. 
-- Ground wind is important to predict the wind after the tide changes or to interprete weather forecasts.
+The **Derived Data** plugin (and similar alternatives) also calculate true wind and ground wind from apparent wind and boat speed. That is sufficient for many purposes. Advanced Wind goes further in two ways:
 
-The relation between the three different winds is as follows:
-- Wind over water (true wind) = wind over ground + current
-- Wind on the vessel (apparent wind) = Wind over water + vessel speed
+1. **Corrections.** Real wind sensors on real boats introduce several systematic errors that a plain trigonometric conversion ignores. Advanced Wind can correct for each of them, individually and with tunable parameters.
+2. **Transparency.** The webapp shows the full calculation pipeline step by step with live vector diagrams, so you can see exactly what each correction does to the data on your own boat.
 
-These relations make it possible to convert one kind of wind to another. These conversions form the basis of the plugin.
+If you only need a quick true-wind number and your instruments are well-calibrated, Derived Data is fine. If you notice that your true wind direction jumps after a tack, that your wind speed seems low in a seaway, or that you want to compare against polar data with confidence, the corrections this plugin provides are worth configuring.
 
-There are in fact two other frames of reference that are relevant to the plugin. One is the mast as the mast moves in respect to the vessel on a rocking boat. The other is the wind sensor as the wind sensor can be misaligned in respect to the vessel.  
+---
 
-## The corrections and calculations
-The plugin calculates the different winds going from one frame of reference to the other, starting with the wind measured by the sensor. In each frame of reference corrections might be applied. The order of calculations is to go from wind sensor to mast to vessel to water to ground. To distighish between the frames of reference we will uses sensor_wind, mast_wind, vessel_wind, water_wind and ground_wind when discussing the calculations and corrections.Furthermore, when we are talking specifically about wind speed ore wind angle we will use sensor_wind_speed or sensor_wind_angle etc.
+## Installation
 
-### Going from sensor to mast, Sensor misalignment correction
-To calculate the mast_wind from the sensor_wind the plugin substracts the sensor misalignment from the sensor_wind_angle. 
-For this correction the plugin uses the plugin parameter sensorMisalignment that can be set in the webApp.
+Install through the SignalK app store or by running `npm install advancedwind` in the SignalK data directory, then restart SignalK and enable the plugin. The SignalK admin settings page for the plugin is intentionally empty — all configuration is done through the webapp.
 
-### Going from mast to vessel, Mast rotation correction
-Some vessels have rotating masts, in this case the wind_angle has to be corrected for this rotation by substracting the mast rotation form the wind angle, vessel_wind_angle = mast_wind_angle - mast rotation.
-SignalK does not have a defined path for mast rotation. The path to use has to be specified in the plugin setting.
+---
 
-### Going from mast to vessel, Mast heel correction
-A wind sensor measures wind speed in a plane. When the mast is upright the sensor measures wind speed in a plane parallel to the surface of the earth. This is also how the wind blows, so the sensor measures all of the wind. When the boat and sensor are tilted then the plane in which the wind is measured is tilted too. The wind not only blows sideways on the sensor but also a bit from above or below. However, as the sensor is blind to the vertical part of the wind, it will only measure a portion of the wind. The wind speed will be underestimated. Knowing the tilt angle of the sensor the plugin can correct for this using the formula vessel_wind = mast_wind / cosine (mast angle).
-For this correction the plugin uses the path vessel.attitude.
+## The webapp — Advanced Wind Insight
 
-### Going from mast to vessel, Mast movement correction
-As a vessel rolls due to wind and waves the wind sensor mounted in the mast moves in respect to the vessel. This movement adds to the windspeed a sensor experiences. To correct for this the plugin calculates this movement and substracts it from the mast_wind. 
-The calculation of mast movement is based on the attitude change of the vessel and the height of the sensor in the mast.
-For this the plugin uses the path vessel.attitude and plugin parameter sensorHeight.
+Open the webapp from **Webapps → Advanced Wind** in the SignalK dashboard. It serves as both the live display and the configuration interface. You do not need to restart the plugin after changing settings; changes take effect immediately.
 
-### Going from mast to vessel, Upwash correction
-The sails of a vessel do bend the wind, A phenomena that is called upwash. The wind angle measured by the wind sensor can to be corrected for this. The amount of upwash depends on the sailplan, on the position of the sensor and on the wind angle. Upwash can not be measured but it can be estimated. The plugin uses this formula to estimate upwash: Upwash Angle (°) =  (α ⋅ wind_angle(°) + β(°)) ⋅ max(0, cos(wind_angle)).
-In this formula alpha and beta are parameters that can be set in the plugin options.
+The left-hand sidebar lists every step of the calculation pipeline. Clicking a step shows:
 
+- A **vector diagram** of the wind and vessel vectors relevant to that step.
+- A **data table** showing the input and output values with units and data-quality indicators.
+- A **Warnings** section that lists any inputs that are missing or not usable, and any required parameters that have not been set.
+- An enable/disable toggle and parameter controls where applicable.
 
-### Going from vessel to water, Leeway correction
-The wind not only pushes a boat forward but also a bit sideways to leeward. This effect is called leeway. Most speed sensors only measure forward speed of the vessel and leeway is ignored. But to properly calculate water_wind leeway should be taken into account. 
+The steps, in calculation order, are:
 
-The boat speed is ten corrected for leeway, boat_speed_angle  = boat_speed_angle + leeway.
-This correction uses the path navigation.leewayAngle. (Leeway can be estimated by Derived Data plugin or by Speed and Current plugin).
+| Step | What it shows |
+|---|---|
+| Overview | Summary diagram: apparent wind in, true wind out, ground wind (if enabled) |
+| Inputs | All incoming Signal K paths, their current values, source selectors and smoother settings |
+| Misalignment | Sensor mounting angle correction |
+| Mast Rotation | Rotating mast correction |
+| Mast Heel | Wind speed underestimation when the boat heels |
+| Mast Movement | Sensor velocity added by the rocking mast |
+| Upwash | Sail-induced wind angle distortion |
+| Leeway | Sideways hull drift correction |
+| True Wind | The true wind (water wind) calculation |
+| Height / 10 m | Wind gradient normalisation to 10 m reference height |
+| Back Calc AW | Apparent wind recalculated from corrected true wind |
+| Ground Wind | Wind over ground calculation |
+| Wind Shift | Fast and slow trend directions and the resulting shift angle |
 
-### Going from vessel to water, boat speed correction
-To calculate water_wind, commonly known as true wind, the plugin substracts vessel speed from the wind, water_wind = vessel_wind - boat_speed. 
+---
 
-### Going from vessel to water, mast height correction
-Wind speed increases with height, an effect called wind gradient. to get wind speed that is comparable between vessels and with boat speed polar data the plugin normalises wind speed to a height of 10 meters, this being the value that is used both in polars and in weather forecasts. The wind gradient depends on factors like the smoothness of the water surface and the temperature difference between wind and water. The gradient is estimated using the formula: Wind gradient = (10 / sensor height above water)^α. Where alpha is a parameter that can be set in the plugin settings. The gradient is a factor that is applied to the wind speed using: water_wind_speed = water_wind_speed * gradient.
+## The corrections
+
+All corrections are disabled by default. Enable only those that apply to your boat and that you can supply the required data for.
+
+### Sensor misalignment
+The wind vane and wind sensor are rarely mounted perfectly in line with the boat's centreline. This correction subtracts a fixed offset angle from the sensor reading. Set the misalignment angle in the webapp.
+
+### Mast rotation
+On boats with a rotating mast (mainly catamarans and some racing dinghies), the mast angle relative to the hull changes the measured wind angle. The plugin requires a Signal K path that provides the mast rotation angle. Because there is no standard path for this, you must specify the path in the plugin settings. This correction has no effect if your mast does not rotate.
+
+### Mast heel
+A wind sensor mounted at the top of a mast measures wind in the plane of the sensor. When the boat heels, that plane tilts away from horizontal and the sensor sees only the cosine component of the wind speed — it underestimates. The correction divides the measured speed by the cosine of the heel angle using `navigation.attitude`. The effect is small at modest heel angles (about 1.5 % at 10°) but grows quickly (about 6 % at 20°, 13 % at 30°).
+
+### Mast movement
+When the boat rolls and pitches in a seaway, the mast tip — and the sensor — moves through the air. This motion adds to the apparent wind the sensor experiences. The correction calculates the velocity of the mast tip from the attitude rate of change and the configured sensor height, then subtracts it from the measured wind. This correction can make the wind data noisier because it amplifies attitude noise, so consider the tradeoff on your boat.
+
+> **Note:** All corrections are optional. Some instrument systems apply heel and/or mast movement corrections internally before sending data to Signal K. Check your instrument documentation to avoid applying the same correction twice.
+
+### Upwash
+The sails bend the airflow, so the wind angle at the sensor is not the same as the undisturbed wind angle. The plugin estimates this using the formula:
+
+$$\text{upwash} = (\alpha \cdot \text{wind angle} + \beta) \cdot \max(0, \cos(\text{wind angle}))$$
+
+The parameters α (slope) and β (offset) can be set in the webapp. The defaults (slope 0.05, offset 1.5°) are a reasonable starting point for a typical fractional sloop, but the correct values depend on your rig. Upwash only affects close-hauled sailing; it goes to zero on a run.
+
+### Leeway
+Most paddlewheel and impeller speed sensors measure speed through the water in the fore-aft direction only. Leeway — the sideways slipping of the hull to leeward — is ignored. This means the boat's actual velocity through the water is slightly different from what is reported. The correction adds the leeway angle to the boat speed vector before subtracting it from the apparent wind. The plugin reads `navigation.leewayAngle`. The Derived Data plugin can supply this path using a model calculation based on heel angle and boat speed. The Speed and Current plugin derives leeway from long-term observation of the difference between heading and course over ground, which is more accurate but takes time to converge.
+
+### Height / wind gradient normalisation to 10 m
+Wind speed increases with height above the water surface. Polar data and weather forecasts standardise on 10 m height. The correction scales the calculated true wind speed to a 10 m reference height using a power-law wind gradient:
+
+$$\text{speed}_{10\,\text{m}} = \text{speed}_{\text{sensor}} \times \left(\frac{10}{\text{height above water}}\right)^{\alpha}$$
+
+The default exponent α = 0.14 is appropriate for open water with neutral atmospheric stability. The configured sensor height above the waterline is also used for the mast movement correction.
+
+---
 
 ## Outputs
 
-### True wind
-The calculated water_wind (or true wind) is written to the paths environment.wind.speedTrue and environment.wind.angleTrueWater.
+| Signal K path | Content |
+|---|---|
+| `environment.wind.speedTrue` | True wind speed (water wind) |
+| `environment.wind.angleTrueWater` | True wind angle (water wind) |
+| `environment.wind.speedApparent` | Back-calculated apparent wind speed (if enabled) |
+| `environment.wind.angleApparent` | Back-calculated apparent wind angle (if enabled) |
+| `environment.wind.speedOverGround` | Ground wind speed (if enabled) |
+| `environment.wind.directionTrue` | Ground wind direction (if enabled) |
+| `environment.wind.directionTrue.trend.fast` | Fast moving average of ground wind direction (wind shift) |
+| `environment.wind.directionTrue.trend.slow` | Slow moving average (reference) |
+| `environment.wind.directionTrue.trend.shift` | Wind shift angle: difference between fast and slow averages |
 
-### Going from water to vessel, applying all corrections to the apparent wind
-To apply the corrections to apparent wind too, it can optionally be back calculated from the true wind: vessel_wind = water_wind + vessel speed. The resulting apparent wind has all the corrections that are done when calculating true wind, except for the leeway correction.
-The backcalculated apparent wind is written to the paths environment.wind.speedApparent and environment.wind.angleApparent. The result will be two diffent values the apparent wind paths, the back calculated one will have source set to AdvancedWind. To prevent having two values for apparent wird the plugin can optionally filter out the original wind data.
+### Back-calculated apparent wind
+When this option is enabled the plugin recalculates apparent wind from the corrected true wind and boat speed. This propagates all the corrections back to the apparent wind path. The "Prevent duplication" option (enabled by default) suppresses the original apparent wind delta so downstream consumers only see one value for `environment.wind.angleApparent` — the corrected one.
 
-### Going from vessel to ground
-Ground wind effectively is wind over water corrected for current. However current cannot be measured directly. Therefore, ground wind is calculated in a different way, using speed over ground and heading of the vessel: ground_wind = vessel_wind − ground_speed.
-To calculate ground wind the plugin uses the paths navigation.speedOverGround, navigation.courseOverGroundTrue and navigation.headingTrue.
-Ground wind is written to the paths environment.wind.speedOverGround and environment.wind.directionTrue.
+### Ground wind
+Ground wind is calculated from vessel wind minus speed over ground (using `navigation.speedOverGround` and `navigation.courseOverGroundTrue`). It requires a calibrated compass (`navigation.headingTrue`) as well. Ground wind is useful for interpreting weather forecasts and for predicting what the wind will do after a tide change.
 
 ### Wind shift detection
-The plugin can optionally detect wind shifts based on ground wind direction. It does this by maintaining two moving averages of true wind direction: a fast one that tracks recent wind and a slow one that acts as a reference. The difference between them is the wind shift angle.
+The wind shift step maintains two moving averages of the ground wind direction: a fast one that tracks recent wind and a slow one that acts as a reference. The difference between them is published as the shift angle. Smoothing types and time constants for both averages can be set independently in the webapp.
 
-Three values are published to SignalK:
-- `environment.wind.directionTrue.trend.fast` — fast moving average of true wind direction
-- `environment.wind.directionTrue.trend.slow` — slow moving average of true wind direction (reference)
-- `environment.wind.directionTrue.trend.shift` — wind shift angle (difference between fast and slow)
+---
 
-The smoothing method and smoother setings for the fast and slow averages are independently configurable in the webapp.
+## Warnings in the webapp
+
+Each step in the webapp shows a **Warnings** section whenever something prevents it from working correctly. The warnings and their meaning:
+
+| Warning | Meaning | What to do |
+|---|---|---|
+| *"[path] — not subscribed to Signal K"* | The plugin tried to subscribe to a path but Signal K rejected the subscription. | Check that the path string is correctly typed in the Sources section of the Inputs step. |
+| *"[path] — path not found in Signal K"* | The path is valid but no device on your network produces this data. | Verify that the instrument producing this data is connected and recognised by SignalK. For optional corrections this simply means the correction cannot be used. |
+| *"[path] — waiting for first data"* | The plugin is subscribed but has not received any data yet. | Wait a few seconds after startup. If it persists, check that the instrument is active and sending data. |
+| *"[path] — data is stale"* | Data was arriving but has stopped updating. | Check the connection to the instrument. Stale detection can be disabled per-path in the Inputs step if the instrument sends infrequent but valid updates. |
+| *"[parameter] is not set"* | A correction is enabled but a required parameter has no value. | Open the settings for that step and enter the missing value. |
+| *"[path] — no data"* | No state information is available at all for this input. | Usually a transient condition at startup; if it persists restart the plugin. |
+
+A step that has active warnings still runs if it can, but the result may be incorrect or the correction may be silently skipped. Resolve warnings before relying on the output for performance analysis.
+
+---
 
 ## Data smoothing
-All inputs can be smoothed before being used in calculations. Four smoother types are available and can be selected in the webapp:
-- **Kalman filter** — balances noise rejection and responsiveness dynamically. Tune with the *Kalman gain* (0 = ignore sensor completely, 1 = trust sensor fully).
-- **Exponential smoother** — classic first-order low-pass filter. Tune with the time constant τ (seconds).
-- **Moving average** — averages all samples within a configurable time window (seconds).
-- **None (pass-through)** — no smoothing applied.
 
-Attitude (heel/pitch) uses a separate smoother with its own type and parameter settings. Because attitude data is differentiated to compute the mast-tip velocity needed for the mast movement correction, a moving average is the recommended default.
+The primary purpose of smoothing is to handle sensors that update at different rates. Wind sensors, GPS, and attitude sensors typically run at different frequencies. By smoothing each input independently you effectively oversample the faster inputs and bring all values to a common, consistent time base.
 
-## Inspecting the effect of calculations and corrections
-The plugin comes with a webapp called **Advanced Wind Insight** that also serves as the live configuration interface. It is available under Webapps in the SignalK dashboard.
+Smoothing also reduces sensor noise at the cost of some responsiveness. The smoother type and parameters are set in the Inputs step. The available smoothers are:
 
-The webapp has a sidebar with a step for each stage of the calculation pipeline:
-- **Overview** — a summary vector diagram showing the main inputs and outputs.
-- **Inputs** — all incoming Signal K paths with their current values, source selectors and smoother settings.
-- One step for each correction: **Misalignment**, **Mast Rotation**, **Mast Heel**, **Mast Movement**, **Upwash**, **Leeway**.
-- **True Wind** — the true wind calculation step.
-- **Height / 10 m** — wind gradient normalisation to a 10 m reference height.
-- **Back Calc AW** — the back-calculated apparent wind.
-- **Ground Wind** — the wind over ground calculation.
-- **Wind Shift** — wind shift detection, showing fast and slow trend directions and the resulting shift angle.
+| Smoother | Best for | Parameter |
+|---|---|---|
+| **Kalman filter** | General use — balances noise and responsiveness automatically | Gain: 0 = ignore sensor, 1 = trust sensor fully |
+| **Exponential (EMA)** | Classic low-pass filtering | Time constant τ in seconds |
+| **Moving average** | Averaging over a fixed time window | Window size in seconds |
+| **None** | When the instrument already filters its output | — |
 
-Each step shows a live vector diagram of the relevant wind and vessel vectors, a table of input and output values with units and data-quality indicators, and controls to enable or disable the correction and adjust its parameters.
+Attitude data (heel/pitch) uses a separate smoother and defaults to a moving average. This is intentional: attitude is differentiated to compute mast tip velocity for the mast movement correction, and a moving average avoids amplifying the high-frequency noise that differentiation would exaggerate with other smoother types.
 
-## Some considerations
-- Some wind sensors or instrument systems are able to apply heel correction or mast movement correction. In that case make sure that the same corrections is not made twice.
-- Corrections increase the quality of the wind data. But they also can increase the noise level of the data, the fluctuations in corrected wind data might under some circumstances be bigger than in uncorrected data. Especially mast movement correction can make wind data noisy. 
-- Good quality boat speed is essential for calculating wind over water. Take time to calibrate the paddle wheel or use the Speed and Current plugin to automatically correct boat speed.
-- Good quality heading is essential for calculating wind over ground. Take time to calibrate the compass.
-- Use the graph from the webapp to get an impression of the quality of your boat speed and heading data. Ground speed and boat speed should be the same when there is no current. The direction of ground wind should not change after tacking. If it does, this indicates poor calibration of the compass or misalignment of the wind sensor.
+---
 
+## Calibration tips
 
+- **Boat speed** is the most important input for true wind quality. A poorly calibrated paddlewheel causes the true wind direction to change after tacking even when the real wind has not. Use the Speed and Current plugin to automate boat speed calibration against GPS SOG in still water.
+- **Compass heading** is the most important input for ground wind quality. A compass error or misalignment shows up as a false wind shift when you tack. Check that your deviation table is current and that the compass is not near magnetic interference.
+- **Wind sensor misalignment** is easy to check on a windless morning in flat water with the engine. Motor directly into the wind and set the misalignment offset so that the apparent wind angle reads zero.
+- Use the **Overview** and **Ground Wind** steps in the webapp after a tack. If the ground wind direction stays constant your calibration is good. If it jumps, focus on compass heading and sensor misalignment first.
+- Corrections increase accuracy on average but can increase noise under some conditions. The mast movement correction in particular amplifies attitude sensor noise at high sea states. If corrected wind is noisier than raw wind, increase the attitude smoother time constant or disable the mast movement correction.
 
+---
 
+## Source selection
 
+For each input the Inputs step shows a source selector. This matters when multiple instruments supply the same path (for example two GPS receivers). Select the source you trust most. The plugin will use only data from that source and ignore data from others for that path.
 
+---
 
+## Frequently asked questions
 
+**Why is the admin settings page empty?**  
+All configuration is in the webapp. The admin page cannot represent the live, interdependent configuration the plugin uses, so it is intentionally left blank. Open **Webapps → Advanced Wind** instead.
 
+**The webapp shows a warning about apparent wind path — is that normal?**  
+If you have enabled "Back-calculate apparent wind" and "Prevent duplication", the plugin suppresses the incoming apparent wind delta. The warning that the apparent wind path shows as stale or not-arriving in *other* plugins is expected in that case — the original signal is being filtered by design.
 
+**Can I run Advanced Wind alongside Derived Data?**  
+Yes. Both plugins write to the same standard Signal K paths, which is correct — in Signal K a path can have multiple sources. Configure your displays to read from the source named `AdvancedWind` to ensure they show the corrected values.
+
+**Does the plugin work without any corrections enabled?**  
+Yes. With all corrections disabled it performs a standard true-wind vector calculation identical to what Derived Data does, plus optionally ground wind. You can then enable corrections one at a time and observe the effect in the webapp.
