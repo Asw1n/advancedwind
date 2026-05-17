@@ -220,7 +220,7 @@ module.exports = function (app) {
   let windShiftFast = null;  // SmoothedAngle on environment.wind.directionTrue (fast EMA)
   let windShiftSlow = null;  // SmoothedAngle on environment.wind.directionTrue (slow EMA / reference)
   let windShift = null;  // inline delta: angle diff (rad) between fast and slow means
-
+  let applyOptionChanges = null;  // Assigned in plugin.start so /settings can drain changedOptions immediately.
 
   plugin.registerWithRouter = function (router) {
     app.debug('registerWithRouter');
@@ -292,6 +292,12 @@ module.exports = function (app) {
       const incoming = req.body || {};
       for (const key of Object.keys(incoming)) {
         changedOptions[key] = clamped[key];
+      }
+      // Apply queued changes now. If we wait for calculate() to drain them, an
+      // apparent-wind source change can never take effect.
+      if (isRunning && typeof applyOptionChanges === 'function' && Object.keys(changedOptions).length) {
+        try { applyOptionChanges(); }
+        catch (e) { app.debug(`applyOptionChanges (PUT /settings) failed: ${e.message}`); }
       }
       // Return the full merged config (with bounds) so the client can update itself.
       res.json({ ...options, ...changedOptions, _bounds: paramBounds });
@@ -838,7 +844,7 @@ module.exports = function (app) {
 
     }
 
-    function applyOptionChanges() {
+    applyOptionChanges = function () {
       let needsSmootherReset = false;
       let needsWindShiftReset = false;
       // Pop each key-value pair from changedOptions
@@ -942,7 +948,7 @@ module.exports = function (app) {
       }
 
       saveOptions();
-    }
+    };
   }
 
 
@@ -977,6 +983,7 @@ module.exports = function (app) {
         windShiftFast = windShiftFast?.terminate();
         windShiftSlow = windShiftSlow?.terminate();
         windShift = windShift?.terminate();
+        applyOptionChanges = null;
         app.debug("plugin stopped");
         app.setPluginStatus("Stopped");
         resolve();
