@@ -877,14 +877,14 @@ function isNotReady(data) {
 }
 
 // Return a human-readable reason why a state item is not ready.
-// Inspects the new state fields (subscribed, pathKnown, hasDelta, isStale) from
-// signalkutilities. For smoothers these fields live under handler/magnitude/angle;
+// Inspects the new state fields (subscribed, pathKnown, sourceNotFound, hasDelta, isStale)
+// from signalkutilities. For smoothers these fields live under handler/magnitude/angle;
 // for plain Polars they are at the top level.
 function getNotReadyReason(data) {
   const s = data?.state;
   if (!s) return "no data";
 
-  // Collect the sub-states that carry subscribed/pathKnown.
+  // Collect the sub-states that carry subscribed/pathKnown/sourceNotFound.
   // MessageSmoother / SmoothedAngle → s.handler
   // PolarSmoother → s.magnitude + s.angle
   // Plain Polar / MessageHandler → s itself
@@ -894,10 +894,11 @@ function getNotReadyReason(data) {
   if (s.angle)      handlerStates.push(s.angle);
   if (handlerStates.length === 0) handlerStates.push(s);
 
-  if (handlerStates.some(h => h.subscribed === false))  return "not subscribed to Signal K";
-  if (handlerStates.some(h => h.pathKnown  === false))  return "path not found in Signal K";
-  if (s.hasDelta === false)                             return "waiting for first data";
-  if (s.isStale  === true)                              return "data is stale";
+  if (handlerStates.some(h => h.subscribed    === false)) return "not subscribed to Signal K";
+  if (handlerStates.some(h => h.pathKnown     === false)) return "path not found in Signal K";
+  if (handlerStates.some(h => h.sourceNotFound === true)) return "configured source not producing data";
+  if (s.hasDelta === false)                               return "waiting for first data";
+  if (s.isStale  === true)                                return "data is stale";
   return "not available";
 }
 

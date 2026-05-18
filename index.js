@@ -220,6 +220,11 @@ module.exports = function (app) {
   let windShiftFast = null;  // SmoothedAngle on environment.wind.directionTrue (fast EMA)
   let windShiftSlow = null;  // SmoothedAngle on environment.wind.directionTrue (slow EMA / reference)
   let windShift = null;  // inline delta: angle diff (rad) between fast and slow means
+  // Hoisted so the PUT /settings handler can drain changedOptions immediately.
+  // Without this, a stale source filter deadlocks the cycle: calculate() only
+  // runs after the smoother samples, and the smoother won't sample while the
+  // filter is rejecting every incoming delta.
+  let applyOptionChanges = null;
 
 
   plugin.registerWithRouter = function (router) {
@@ -292,6 +297,11 @@ module.exports = function (app) {
       const incoming = req.body || {};
       for (const key of Object.keys(incoming)) {
         changedOptions[key] = clamped[key];
+      }
+      // Drain changedOptions immediately so a source change takes effect even when
+      // calculate() is deadlocked (e.g. a stale source filter blocking all deltas).
+      if (isRunning && typeof applyOptionChanges === 'function' && Object.keys(changedOptions).length) {
+        try { applyOptionChanges(); } catch (e) { app.debug(`applyOptionChanges (PUT /settings) failed: ${e.message}`); }
       }
       // Return the full merged config (with bounds) so the client can update itself.
       res.json({ ...options, ...changedOptions, _bounds: paramBounds });
@@ -838,7 +848,7 @@ module.exports = function (app) {
 
     }
 
-    function applyOptionChanges() {
+    applyOptionChanges = function () {
       let needsSmootherReset = false;
       let needsWindShiftReset = false;
       // Pop each key-value pair from changedOptions
@@ -942,7 +952,7 @@ module.exports = function (app) {
       }
 
       saveOptions();
-    }
+    };
   }
 
 
@@ -977,6 +987,7 @@ module.exports = function (app) {
         windShiftFast = windShiftFast?.terminate();
         windShiftSlow = windShiftSlow?.terminate();
         windShift = windShift?.terminate();
+        applyOptionChanges = null;
         app.debug("plugin stopped");
         app.setPluginStatus("Stopped");
         resolve();
