@@ -8,7 +8,10 @@
   },
   "files": [
     "index.js",
-    "public/",
+    "public/icon.png",
+    "public/index.html",
+    "public/insight.js",
+    "public/main.css",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
