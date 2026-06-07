@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
+## [2.7.0] - 2026-06-02
+
+### Changed
+- Upgraded `signalkutilities` dependency to v2.0.0. Signal K server now manages source priorities natively, delivering the highest-priority source for each path automatically.
+- Config schema version bumped to 3.4. Existing installs are migrated automatically on first start.
+
+### Removed
+- Per-input source selectors. The Signal K server's built-in source priority ranking replaces this functionality. The source selection dropdowns have been removed from the webapp Inputs step.
+- "Prevent duplication" option. Signal K's `excludeSelf: true` behaviour prevents the plugin's own output from feeding back as input, making this toggle unnecessary.
+- All `source`, `passOn`, `sourceMagnitude`, `sourceAngle` arguments have been removed from internal `configure`, `createSmoothedHandler`, `createSmoothedPolar`, and `SmoothedAngle` calls in line with the v2 library API.
+
 ## [2.6.6] - 2026-05-18
 
 ### Fixed

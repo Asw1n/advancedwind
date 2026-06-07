@@ -37,7 +37,7 @@ The steps, in calculation order, are:
 | Step | What it shows |
 |---|---|
 | Overview | Summary diagram: apparent wind in, true wind out, ground wind (if enabled) |
-| Inputs | All incoming Signal K paths, their current values, source selectors and smoother settings |
+| Inputs | All incoming Signal K paths, their current values, and smoother settings |
 | Misalignment | Sensor mounting angle correction |
 | Mast Rotation | Rotating mast correction |
 | Mast Heel | Wind speed underestimation when the boat heels |
@@ -104,7 +104,7 @@ The default exponent α = 0.14 is appropriate for open water with neutral atmosp
 | `environment.wind.directionTrue.trend.shift` | Wind shift angle: difference between fast and slow averages |
 
 ### Back-calculated apparent wind
-When this option is enabled the plugin recalculates apparent wind from the corrected true wind and boat speed. This propagates all the corrections back to the apparent wind path. The "Prevent duplication" option (enabled by default) suppresses the original apparent wind delta so downstream consumers only see one value for `environment.wind.angleApparent` — the corrected one.
+When this option is enabled the plugin recalculates apparent wind from the corrected true wind and boat speed. This propagates all the corrections back to the apparent wind path. The plugin publishes the corrected value under the source name `AdvancedWind` on `environment.wind.angleApparent` and `environment.wind.speedApparent`. To make downstream consumers use the corrected value, configure Signal K source priorities so that `AdvancedWind` ranks above the raw wind sensor for those paths.
 
 ### Ground wind
 Ground wind is calculated from vessel wind minus speed over ground (using `navigation.speedOverGround` and `navigation.courseOverGroundTrue`). It requires a calibrated compass (`navigation.headingTrue`) as well. Ground wind is useful for interpreting weather forecasts and for predicting what the wind will do after a tide change.
@@ -120,11 +120,10 @@ Each step in the webapp shows a **Warnings** section whenever something prevents
 
 | Warning | Meaning | What to do |
 |---|---|---|
-| *"[path] — not subscribed to Signal K"* | The plugin tried to subscribe to a path but Signal K rejected the subscription. | Check that the path string is correctly typed in the Sources section of the Inputs step. |
+| *"[path] — not subscribed to Signal K"* | The plugin tried to subscribe to a path but Signal K rejected the subscription. | Check that the path string is correctly typed in the Inputs step. |
 | *"[path] — path not found in Signal K"* | The path is valid but no device on your network produces this data. | Verify that the instrument producing this data is connected and recognised by SignalK. For optional corrections this simply means the correction cannot be used. |
-| *"[path] — configured source not producing data"* | A specific source is selected for this input but no data is arriving from it. This typically means the instrument was replaced or renamed and an old source name is still configured. | Open the Sources section of the Inputs step and clear the source selector for this input to accept data from any source. You can then select the new source from the dropdown once data is flowing. |
 | *"[path] — waiting for first data"* | The plugin is subscribed but has not received any data yet. | Wait a few seconds after startup. If it persists, check that the instrument is active and sending data. |
-| *"[path] — data is stale"* | Data was arriving but has stopped updating. | Check the connection to the instrument. Stale detection can be disabled per-path in the Inputs step if the instrument sends infrequent but valid updates. |
+| *"[path] — data is stale"* | Data was arriving but has stopped updating. | Check the connection to the instrument. Stale detection can be disabled in the Inputs step if the instrument sends infrequent but valid updates. |
 | *"[parameter] is not set"* | A correction is enabled but a required parameter has no value. | Open the settings for that step and enter the missing value. |
 | *"[path] — no data"* | No state information is available at all for this input. | Usually a transient condition at startup; if it persists restart the plugin. |
 
@@ -159,19 +158,10 @@ Attitude data (heel/pitch) uses a separate smoother and defaults to a moving ave
 
 ---
 
-## Source selection
-
-For each input the Inputs step shows a source selector. This matters when multiple instruments supply the same path (for example two GPS receivers). Select the source you trust most. The plugin will use only data from that source and ignore data from others for that path.
-
----
-
 ## Frequently asked questions
 
 **Why is the admin settings page empty?**  
 All configuration is in the webapp. The admin page cannot represent the live, interdependent configuration the plugin uses, so it is intentionally left blank. Open **Webapps → Advanced Wind** instead.
-
-**The webapp shows a warning about apparent wind path — is that normal?**  
-If you have enabled "Back-calculate apparent wind" and "Prevent duplication", the plugin suppresses the incoming apparent wind delta. The warning that the apparent wind path shows as stale or not-arriving in *other* plugins is expected in that case — the original signal is being filtered by design.
 
 **Can I run Advanced Wind alongside Derived Data?**  
 Yes. Both plugins write to the same standard Signal K paths, which is correct — in Signal K a path can have multiple sources. Configure your displays to read from the source named `AdvancedWind` to ensure they show the corrected values.

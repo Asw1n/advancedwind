@@ -14,10 +14,11 @@
     "public/main.css",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "test"
   ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test test/plugin.test.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -41,9 +42,16 @@
   "signalk-plugin-enabled-by-default": false,
   "signalk": {
     "appIcon": "./icon.png",
-    "displayName": "Advanced Wind"
+    "displayName": "Advanced Wind",
+    "screenshots": [
+      "https://raw.githubusercontent.com/Asw1n/advancedwind/main/docs/overview.png",
+      "https://raw.githubusercontent.com/Asw1n/advancedwind/main/docs/inputs.png",
+      "https://raw.githubusercontent.com/Asw1n/advancedwind/main/docs/heel.png",
+      "https://raw.githubusercontent.com/Asw1n/advancedwind/main/docs/upwash.png",
+      "https://raw.githubusercontent.com/Asw1n/advancedwind/main/docs/windshift.png"
+    ]
   },
   "dependencies": {
-    "signalkutilities": "1.12.1"
+    "signalkutilities": "^2.0.0"
   }
 }

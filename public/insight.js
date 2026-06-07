@@ -33,6 +33,8 @@ let svgCanvas = null;
 
 // Auto-scale state (exponential smoothing, same as vectors.js)
 let _scalePrev = 0;
+// SVG element IDs that were actually drawn in the most recent renderSVG call.
+let _activeSvgIds = new Set();
 
 function _getLargest(polars) {
   let largest = 1;
@@ -102,123 +104,76 @@ function _drawVectors(svg, polars, heading, scale) {
   });
 }
 
-// Build the list of polar-like objects to show in the SVG for the current scene.
-// Returns { polars: [...], showBoatSpeed: bool }.
-// id on each object controls CSS colour; aliasing reuses existing colour rules.
-function _buildScenePolars(stepId, cfg, st) {
-  const pb = st.polarsById;
-  // Clone a polar with a different id for colour mapping.
-  // Preserve plane from meta keyed by the original id, since report() doesn't include it
-  // and after aliasing meta[newId] won't find it.
-  const as = (src, id) => src ? { ...src, id, plane: src.plane ?? meta[src.id]?.plane } : null;
-  const ok = arr => arr.filter(Boolean);
-
-  // Geometry-based heel and mastMove vectors (bypass wind scale).
-  // heelVector: mast tip displacement = sin(pitch)×112.5 fore-aft, sin(roll)×112.5 lateral.
-  // mastMoveVector: sensor velocity (m/s) scaled to SVG units via mast height.
-  const mastH = (cfg && cfg.heightAboveWater) || 18;
-  const svgPerMetre = 112.5 / mastH;
+// Compute derived polars and inject them into st.polarsById so they are treated
+// identically to server-reported polars by the generic _buildScenePolars reader.
+// Must be called after normaliseState and whenever config changes.
+function _computeDerivedPolars(cfg, st) {
   const attObj = st.attitudesById["attitude.smoothed"];
   const roll  = attObj && attObj.value ? (attObj.value.roll  || 0) : 0;
   const pitch = attObj && attObj.value ? (attObj.value.pitch || 0) : 0;
 
-  switch (stepId) {
-    case "overview": {
-      const list = [];
-      // Suppress apparentWind when back-calc replaces it in SK.
-      if (!(cfg.backCalculateApparentWind && cfg.preventDuplication))
-        list.push(as(pb["apparentWind.smoothed"], "apparentWind"));
-      list.push(pb.trueWind);
-      if (cfg.backCalculateApparentWind) list.push(as(pb.backCalcOut, "correctedWind"));
-      if (cfg.calculateGroundWind)       list.push(pb.groundWind);
-      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
-    }
-    case "inputs": {
-      const list = [as(pb["apparentWind.smoothed"], "apparentWind")];
-      if (cfg.calculateGroundWind) list.push(as(pb["groundSpeed.smoothed"], "groundSpeed"));
-      const geo = [];
-      geo.push({ id: "heelVector", x: Math.sin(pitch) * 112.5, y: Math.sin(roll) * 112.5,
-                 solid: true, plane: "Boat" });
-      return { polars: ok(list), geoPolars: ok(geo), showBoatSpeed: true };
-    }
-    case "misalign": {
-      const list = [as(pb.misalignIn, "apparentWind")];
-      if (cfg.correctForMisalign)     list.push(as(pb.misalignOut, "correctedWind"));
-      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
-    }
-    case "mastRot": {
-      const list = [as(pb.mastRotIn, "apparentWind")];
-      if (cfg.correctForMastRotation) list.push(as(pb.mastRotOut, "correctedWind"));
-      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
-    }
-    case "mastHeel": {
-      const list = [as(pb.mastHeelIn, "apparentWind")];
-      const geo = [];
-      if (cfg.correctForMastHeel) {
-        list.push(as(pb.mastHeelOut, "correctedWind"));
-        // Geometry-based: mast tip displacement from roll (lateral) and pitch (fore-aft).
-        // x = sin(pitch)×112.5, y = sin(roll)×112.5 SVG units (mast height cancels).
-        geo.push({ id: "heelVector", x: Math.sin(pitch) * 112.5, y: Math.sin(roll) * 112.5,
-                   solid: true, plane: "Boat" });
-      }
-      return { polars: ok(list), geoPolars: ok(geo), showBoatSpeed: false };
-    }
-    case "mastMove": {
-      const list = [as(pb.mastMoveIn, "apparentWind")];
-      const geo = [];
-      if (cfg.correctForMastMovement) {
-        list.push(as(pb.mastMoveOut, "correctedWind"));
-        if (pb.sensorSpeed) {
-          // sensorSpeed is in m/s; scale to SVG units via mast height.
-          geo.push({ id: "mastMoveVector",
-                     x: (pb.sensorSpeed.x || 0) * svgPerMetre,
-                     y: (pb.sensorSpeed.y || 0) * svgPerMetre,
-                     solid: true, plane: "Boat" });
-        }
-      }
-      return { polars: ok(list), geoPolars: ok(geo), showBoatSpeed: false };
-    }
-    case "upwash": {
-      const list = [as(pb.upwashIn, "apparentWind")];
-      if (cfg.correctForUpwash) list.push(as(pb.upwashOut, "correctedWind"));
-      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
-    }
-    case "leeway": {
-      const list = [as(pb.leewayIn, "apparentWind")];
-      if (cfg.correctForLeeway) list.push(as(pb.leewayOut, "correctedWind"));
-      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
-    }
-    case "trueWind": {
-      // trueWindIn = corrected apparent wind entering true-wind step
-      const list = [as(pb.trueWindIn, "apparentWind"), pb.trueWind];
-      return { polars: ok(list), geoPolars: [], showBoatSpeed: true };
-    }
-    case "height": {
-      // heightIn = trueWind before height scaling; trueWind = after scaling (in place)
-      const list = [as(pb.heightIn, "trueWind")];
-      if (cfg.correctForHeight) list.push(as(pb.heightOut, "correctedWind"));
-      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
-    }
-    case "backCalc": {
-      const list = [pb.trueWind, as(pb.backCalcOut, "correctedWind")];
-      return { polars: ok(list), geoPolars: [], showBoatSpeed: true };
-    }
-    case "groundWind": {
-      const list = [as(pb.groundWindIn, "apparentWind"), as(pb["groundSpeed.smoothed"], "groundSpeed"), pb.groundWind];
-      return { polars: ok(list), geoPolars: [], showBoatSpeed: false };
-    }
-    case "windShift": {
-      // windShiftFast and windShiftSlow are angle deltas — build unit-length polars for the SVG.
-      const toUnit = (d) => d && typeof d.value === 'number'
-        ? { id: d.id, x: Math.cos(d.value), y: Math.sin(d.value), solid: true, plane: 'Ground' }
-        : null;
-      const fast = st.deltasById['windShiftFast'];
-      const slow = st.deltasById['windShiftSlow'];
-      return { polars: ok([toUnit(fast), toUnit(slow)]), geoPolars: [], showBoatSpeed: false };
-    }
-    default:
-      return { polars: ok([pb["apparentWind.smoothed"], pb.trueWind]), geoPolars: [], showBoatSpeed: false };
+  // heelVector: mast-tip displacement in SVG units — x=fore-aft (pitch), y=lateral (roll).
+  // svgUnits:true means it bypasses wind scale and is drawn at scale=1.
+  st.polarsById["heelVector"] = {
+    id: "heelVector", x: Math.sin(pitch) * 112.5, y: Math.sin(roll) * 112.5,
+    solid: true, plane: "Boat", svgUnits: true
+  };
+
+  // mastMoveVector derived polar is no longer needed: sensorSpeed is already in m/s
+  // (wind units) and Boat-plane, so it is drawn directly at wind scale via svgRole.
+
+  // boatSpeed: inject as a forward-pointing Boat-plane polar keyed under "boatSpeed.smoothed"
+  // to match the descriptor id in stepConfigs; rendered with svgRole "boatSpeed".
+  const bsDelta = st.deltasById["boatSpeed.smoothed"];
+  const bsVal = bsDelta ? (bsDelta.value || 0) : 0;
+  if (bsVal > 0) {
+    st.polarsById["boatSpeed.smoothed"] = {
+      id: "boatSpeed.smoothed", x: bsVal, y: 0, solid: false, plane: "Boat"
+    };
+  } else {
+    delete st.polarsById["boatSpeed.smoothed"];
   }
+
+  // windShiftFast / windShiftSlow: convert angle deltas to fixed-length ground-plane polars.
+  // svgUnits:true bypasses wind scale; length is fixed at 90 SVG units (45% of 200-unit height).
+  const WIND_SHIFT_LEN = 90;
+  ["windShiftFast", "windShiftSlow"].forEach(key => {
+    const d = st.deltasById[key];
+    if (d && typeof d.value === "number") {
+      st.polarsById[key] = {
+        id: key, x: Math.cos(d.value) * WIND_SHIFT_LEN, y: Math.sin(d.value) * WIND_SHIFT_LEN,
+        solid: true, plane: "Ground", svgUnits: true
+      };
+    } else {
+      delete st.polarsById[key];
+    }
+  });
+}
+
+// Build the list of polar-like objects to show in the SVG for the current scene.
+// Reads svgRole from stepConfigs descriptors (inputs, outputs, svgExtra).
+// Polars are looked up from st.polarsById, which includes derived polars injected
+// by _computeDerivedPolars. svgRole becomes the SVG element id (= CSS colour key).
+function _buildScenePolars(stepId, cfg, st) {
+  const scfg = stepConfigs[stepId];
+  if (!scfg) return { polars: [] };
+
+  const currentCfg = cfg || {};
+  const inputs  = typeof scfg.inputs   === "function" ? scfg.inputs(currentCfg)   : (scfg.inputs   || []);
+  const outputs = typeof scfg.outputs  === "function" ? scfg.outputs(currentCfg)  : (scfg.outputs  || []);
+  const extra   = typeof scfg.svgExtra === "function" ? scfg.svgExtra(currentCfg) : (scfg.svgExtra || []);
+
+  const polars = [];
+  [...inputs, ...outputs, ...extra].forEach(item => {
+    if (!item.svgRole) return;
+    const src = st.polarsById[item.id];
+    if (!src) return;
+    // Alias id to svgRole so CSS colouring uses the role name.
+    // Preserve plane from the source object; fall back to meta for the original id.
+    polars.push({ ...src, id: item.svgRole, plane: src.plane ?? meta[item.id]?.plane });
+  });
+
+  return { polars };
 }
 
 function renderSVG() {
@@ -230,43 +185,21 @@ function renderSVG() {
   const headingDelta = state.deltasById["heading.smoothed"];
   const heading = headingDelta ? headingDelta.value * 180 / Math.PI : 0;
 
-  const { polars, geoPolars, showBoatSpeed } = _buildScenePolars(currentStepId, cfg, state);
+  const { polars } = _buildScenePolars(currentStepId, cfg, state);
 
-  // boatSpeed: include in scale even when drawn separately.
-  const boatSpeedDelta = state.deltasById["boatSpeed.smoothed"];
-  const boatSpeedVal   = showBoatSpeed && boatSpeedDelta ? (boatSpeedDelta.value || 0) : 0;
+  // Polars with svgUnits:true are already in SVG units and bypass the wind scale.
+  const windPolars = polars.filter(p => !p.svgUnits);
+  const geoPolars  = polars.filter(p =>  p.svgUnits);
 
-  // Wind polars drive the auto-scale; geometry polars (heelVector, mastMoveVector)
-  // are already in SVG units and bypass the wind scale (drawn at scale=1).
-  let largest = Math.max(_getLargest(polars), Math.abs(boatSpeedVal));
+  let largest = _getLargest(windPolars);
   if (largest < 1) largest = 1;
   const scale = _smoothScale(largest);
 
-  _drawBoat(svg, heading);
-  _drawVectors(svg, polars, heading, scale);
-  if (geoPolars && geoPolars.length) _drawVectors(svg, geoPolars, heading, 1);
+  _activeSvgIds = new Set(polars.map(p => p.id));
 
-  // Draw boatSpeed as a pure forward (no leeway) dashed vector.
-  if (showBoatSpeed && boatSpeedVal > 0) {
-    const len = boatSpeedVal * scale;
-    let dash;
-    let s = scale * 5 / 1.94384 - 1;
-    if (s > 50) {
-      s = s / 5;
-      dash = `1 1 ${s - 1} 1 ${s} 1 ${s} 1 ${s} 1 ${s - 1} 1 `;
-    } else {
-      dash = `1 1 ${s - 1} 1 ${s} 1 `;
-    }
-    const v = _svgEl("line", {
-      x1: 0, y1: 0,
-      x2: len, y2: 0,
-      id: "boatSpeed",
-      "stroke-dasharray": dash,
-      "stroke-dashoffset": "1",
-      transform: `rotate(${heading - 90})`
-    });
-    svg.appendChild(v);
-  }
+  _drawBoat(svg, heading);
+  _drawVectors(svg, windPolars, heading, scale);
+  if (geoPolars.length) _drawVectors(svg, geoPolars, heading, 1);
 }
 
 let state = {
@@ -426,18 +359,10 @@ const paramMeta = {
   attitudeSmootherTau:         { label: "Attitude time constant (τ)",                                    unit: "s", type: "number" },
   attitudeSmootherTimeSpan:    { label: "Attitude window size",                                          unit: "s", type: "number" },
   attitudeSmootherSteadyState: { label: "Attitude Kalman gain",                                         unit: "",  type: "number" },
-  headingSource:               { label: "Heading source",       path: "navigation.headingTrue",          unit: "",  type: "string", sourceOf: { type: "delta",    id: "heading.smoothed" } },
-  attitudeSource:              { label: "Attitude source",      path: "navigation.attitude",             unit: "",  type: "string", sourceOf: { type: "attitude", id: "attitude.smoothed" } },
-  boatSpeedSource:             { label: "Boat speed source",    path: "navigation.speedThroughWater",    unit: "",  type: "string", sourceOf: { type: "delta",    id: "boatSpeed.smoothed" } },
-  leewaySource:                { label: "Leeway angle source",  path: "navigation.leewayAngle",          unit: "",  type: "string", sourceOf: { type: "delta",    id: "leeway.smoothed" } },
-  windSpeedSource:             { label: "Wind speed source",    path: "environment.wind.speedApparent",  unit: "",  type: "string", sourceOf: { type: "polar",    id: "apparentWind.smoothed" } },
   rotationPath:                { label: "Mast rotation path",                                            unit: "",  type: "string" },
-  rotationSource:              { label: "Mast rotation source", path: "(see rotation path above)",       unit: "",  type: "string", sourceOf: { type: "delta",    id: "mast.smoothed" } },
-  groundSpeedSource:           { label: "Ground speed source",  path: "navigation.speedOverGround",      unit: "",  type: "string", sourceOf: { type: "polar",    id: "groundSpeed.smoothed" } },
   stalenessDetection:          { label: "Staleness detection",                                           unit: "",  type: "boolean" },
   calculateGroundWind:         { label: "Calculate Wind direction",                                      unit: "",  type: "boolean" },
   backCalculateApparentWind:   { label: "Back-calculate apparent wind",                                  unit: "",  type: "boolean" },
-  preventDuplication:          { label: "Replace apparent wind (prevent duplication)",                   unit: "",  type: "boolean" },
   detectWindShift:             { label: "Detect wind shifts",                                            unit: "",  type: "boolean" },
   windShiftFastClass:          { label: "Fast smoother type",                                            unit: "",  type: "select",
     options: [
@@ -476,7 +401,7 @@ const stepConfigs = {
     parameters: [],
     inputs: (cfg) => {
       const items = [
-        { type: "polar", id: "apparentWind.smoothed" },
+        { type: "polar", id: "apparentWind.smoothed", svgRole: "apparentWind" },
         { type: "delta", id: "boatSpeed.smoothed" }
       ];
       if (cfg.correctForMastHeel || cfg.correctForMastMovement)
@@ -488,11 +413,11 @@ const stepConfigs = {
       return items;
     },
     outputs: (cfg) => {
-      const items = [ { type: "polar", id: "trueWind" } ];
+      const items = [ { type: "polar", id: "trueWind", svgRole: "trueWind" } ];
       if (cfg.backCalculateApparentWind)
-        items.push({ type: "polar", id: "backCalcOut" });
+        items.push({ type: "polar", id: "backCalcOut", svgRole: "correctedWind" });
       if (cfg.calculateGroundWind)
-        items.push({ type: "polar", id: "groundWind" });
+        items.push({ type: "polar", id: "groundWind", svgRole: "groundWind" });
       if (cfg.detectWindShift) {
         items.push({ type: "delta", id: "windShiftFast" });
         items.push({ type: "delta", id: "windShiftSlow" });
@@ -502,17 +427,10 @@ const stepConfigs = {
     }
   },
   inputs: {
-    description: "Start of the calculation pipeline. All incoming Signal K paths are listed here — each can be filtered to a specific source. Raw samples are fed through a smoother before entering the calculations; choose the smoother type and tune its parameters below.",
+    description: "Start of the calculation pipeline. Raw samples are fed through a smoother before entering the calculations; choose the smoother type and tune its parameters below.",
     correctionFlag: null,
     parameters: [
-      "windSpeedSource",
-      "boatSpeedSource",
-      "headingSource",
-      "attitudeSource",
-      "leewaySource",
       "rotationPath",
-      "rotationSource",
-      "groundSpeedSource",
       "smootherClass",
       { key: "smootherTau",                 showIf: cfg => (cfg.smootherClass || "ExponentialSmoother") === "ExponentialSmoother" },
       { key: "smootherTimeSpan",            showIf: cfg => (cfg.smootherClass || "ExponentialSmoother") === "MovingAverageSmoother" },
@@ -520,15 +438,16 @@ const stepConfigs = {
       // PassThroughSmoother has no parameters — nothing extra to show.
       "stalenessDetection",
     ],
-    inputs: [
-      { type: "polar",    id: "apparentWind.smoothed" },
-      { type: "delta",    id: "boatSpeed.smoothed" },
+    inputs: (cfg) => [
+      { type: "polar",    id: "apparentWind.smoothed", svgRole: "apparentWind" },
+      { type: "delta",    id: "boatSpeed.smoothed",    svgRole: "boatSpeed" },
       { type: "delta",    id: "heading.smoothed" },
-      { type: "attitude", id: "attitude.smoothed" },
+      { type: "attitude", id: "attitude.smoothed",     svgRole: "heelVector" },
       { type: "delta",    id: "leeway.smoothed" },
       { type: "delta",    id: "mast.smoothed" },
-      { type: "polar",    id: "groundSpeed.smoothed" },
+      { type: "polar",    id: "groundSpeed.smoothed",  ...(cfg.calculateGroundWind ? { svgRole: "groundSpeed" } : {}) },
     ],
+    svgExtra: [{ id: "heelVector", svgRole: "heelVector" }],
     outputs: []
   },
   misalign: {
@@ -536,129 +455,125 @@ const stepConfigs = {
     correctionFlag: "correctForMisalign",
     parameters: ["sensorMisalignment"],
     inputs:  [
-      { type: "polar", id: "misalignIn" }
+      { type: "polar", id: "misalignIn", svgRole: "apparentWind" }
     ],
-    outputs: [
-      { type: "polar", id: "misalignOut" }
-    ]
+    outputs: (cfg) => cfg.correctForMisalign
+      ? [{ type: "polar", id: "misalignOut", svgRole: "correctedWind" }]
+      : [{ type: "polar", id: "misalignOut" }]
   },
   mastRot: {
     description: "Correct for a rotating mast.",
     correctionFlag: "correctForMastRotation",
-    parameters: ["rotationPath", "rotationSource"],
+    parameters: ["rotationPath"],
     inputs:  [
-      { type: "polar", id: "mastRotIn" },
+      { type: "polar", id: "mastRotIn", svgRole: "apparentWind" },
       { type: "delta", id: "mast.smoothed" }
     ],
-    outputs: [
-      { type: "polar", id: "mastRotOut" }
-    ]
+    outputs: (cfg) => cfg.correctForMastRotation
+      ? [{ type: "polar", id: "mastRotOut", svgRole: "correctedWind" }]
+      : [{ type: "polar", id: "mastRotOut" }]
   },
   mastHeel: {
     description: "Compensates for wind speed underreading caused by the sensor tilting with a heeled mast.",
     correctionFlag: "correctForMastHeel",
-    parameters: ["attitudeSource"],
-    inputs:  [
-      { type: "polar",    id: "mastHeelIn" },
-      { type: "attitude", id: "attitude.smoothed" }
+    parameters: [],
+    inputs:  (cfg) => [
+      { type: "polar",    id: "mastHeelIn",        svgRole: "apparentWind" },
+      { type: "attitude", id: "attitude.smoothed", ...(cfg.correctForMastHeel ? { svgRole: "heelVector" } : {}) }
     ],
-    outputs: [
-      { type: "polar", id: "mastHeelOut" }
-    ]
+    outputs: (cfg) => cfg.correctForMastHeel
+      ? [{ type: "polar", id: "mastHeelOut", svgRole: "correctedWind" }]
+      : [{ type: "polar", id: "mastHeelOut" }],
+    svgExtra: (cfg) => cfg.correctForMastHeel
+      ? [{ id: "heelVector", svgRole: "heelVector" }]
+      : []
   },
   mastMove: {
     description: "Correct for mast movement due to waves.",
     correctionFlag: "correctForMastMovement",
     parameters: [
       "heightAboveWater",
-      "attitudeSource",
       "attitudeSmootherClass",
       { key: "attitudeSmootherTau",         showIf: cfg => (cfg.attitudeSmootherClass || "MovingAverageSmoother") === "ExponentialSmoother" },
       { key: "attitudeSmootherTimeSpan",    showIf: cfg => (cfg.attitudeSmootherClass || "MovingAverageSmoother") === "MovingAverageSmoother" },
       { key: "attitudeSmootherSteadyState", showIf: cfg => (cfg.attitudeSmootherClass || "MovingAverageSmoother") === "KalmanSmoother" },
     ],
-    inputs:  [
-      { type: "polar",    id: "mastMoveIn" },
+    inputs:  (cfg) => [
+      { type: "polar",    id: "mastMoveIn",        svgRole: "apparentWind" },
       { type: "attitude", id: "attitude.smoothed" },
-      { type: "polar",    id: "sensorSpeed" }
+      { type: "polar",    id: "sensorSpeed",       ...(cfg.correctForMastMovement ? { svgRole: "mastMoveVector" } : {}) }
     ],
-    outputs: [
-      { type: "polar", id: "mastMoveOut" }
-    ]
+    outputs: (cfg) => cfg.correctForMastMovement
+      ? [{ type: "polar", id: "mastMoveOut", svgRole: "correctedWind" }]
+      : [{ type: "polar", id: "mastMoveOut" }],
+    svgExtra: []
   },
   upwash: {
     description: "Correct for sail-induced upwash.",
     correctionFlag: "correctForUpwash",
     parameters: ["upwashSlope", "upwashOffset"],
     inputs:  [
-      { type: "polar", id: "upwashIn" },
+      { type: "polar", id: "upwashIn", svgRole: "apparentWind" },
       { type: "delta", id: "upwashAngle" }
     ],
-    outputs: [
-      { type: "polar", id: "upwashOut" }
-    ]
+    outputs: (cfg) => cfg.correctForUpwash
+      ? [{ type: "polar", id: "upwashOut", svgRole: "correctedWind" }]
+      : [{ type: "polar", id: "upwashOut" }]
   },
   leeway: {
     description: "Correct for leeway.",
     correctionFlag: "correctForLeeway",
-    parameters: ["leewaySource"],
+    parameters: [],
     inputs:  [
-      { type: "polar", id: "leewayIn" },
+      { type: "polar", id: "leewayIn", svgRole: "apparentWind" },
       { type: "delta", id: "leeway.smoothed" }
     ],
-    outputs: [
-      { type: "polar", id: "leewayOut" }
-    ]
+    outputs: (cfg) => cfg.correctForLeeway
+      ? [{ type: "polar", id: "leewayOut", svgRole: "correctedWind" }]
+      : [{ type: "polar", id: "leewayOut" }]
   },
   trueWind: {
     description: "Calculates true wind by subtracting boat speed from apparent wind.",
     correctionFlag: null,
-    parameters: ["boatSpeedSource"],
+    parameters: [],
     inputs:  [
-      { type: "polar", id: "trueWindIn" },
-      { type: "delta", id: "boatSpeed.smoothed" }
+      { type: "polar", id: "trueWindIn",         svgRole: "apparentWind" },
+      { type: "delta", id: "boatSpeed.smoothed", svgRole: "boatSpeed" }
     ],
-    outputs: [
-      { type: "polar", id: "trueWind" }
-    ]
+    outputs: [{ type: "polar", id: "trueWind", svgRole: "trueWind" }]
   },
   height: {
     description: "Scales true wind speed to a reference height of 10 m as used in weather forecasts and in polars.",
     correctionFlag: "correctForHeight",
     parameters: ["heightAboveWater", "windExponent"],
-    inputs:  [
-      { type: "polar", id: "heightIn" }
-    ],
-    outputs: [
-      { type: "polar", id: "heightOut" }
-    ]
+    inputs:  [{ type: "polar", id: "heightIn", svgRole: "trueWind" }],
+    outputs: (cfg) => cfg.correctForHeight
+      ? [{ type: "polar", id: "heightOut", svgRole: "correctedWind" }]
+      : [{ type: "polar", id: "heightOut" }]
   },
   backCalc: {
     description: "Back-calculates apparent wind and sends it to SignalK.",
     correctionFlag: "backCalculateApparentWind",
-    parameters: [
-      "preventDuplication"
-    ],
+    parameters: [],
     inputs:  [
       { type: "polar", id: "heightOut" },
-      { type: "delta", id: "boatSpeed.smoothed" }
+      { type: "delta", id: "boatSpeed.smoothed", svgRole: "boatSpeed" }
     ],
-    outputs: [
-      { type: "polar", id: "backCalcOut" }
-    ]
+    outputs: (cfg) => cfg.backCalculateApparentWind
+      ? [{ type: "polar", id: "backCalcOut", svgRole: "correctedWind" }]
+      : [{ type: "polar", id: "backCalcOut" }],
+    svgExtra: [{ id: "trueWind", svgRole: "trueWind" }]
   },
   groundWind: {
     description: "Calculates wind direction (wind over ground).",
     correctionFlag: "calculateGroundWind",
-    parameters: ["groundSpeedSource", "headingSource"],
+    parameters: [],
     inputs:  [
-      { type: "polar", id: "groundWindIn" },
-      { type: "polar", id: "groundSpeed.smoothed" },
+      { type: "polar", id: "groundWindIn",        svgRole: "apparentWind" },
+      { type: "polar", id: "groundSpeed.smoothed", svgRole: "groundSpeed" },
       { type: "delta", id: "heading.smoothed" }
     ],
-    outputs: [
-      { type: "polar", id: "groundWind" }
-    ]
+    outputs: [{ type: "polar", id: "groundWind", svgRole: "groundWind" }]
   },
   windShift: {
     description: "Detects wind shifts by comparing a fast-responding mean ground wind to a slow reference mean.",
@@ -674,11 +589,11 @@ const stepConfigs = {
       { key: "windShiftSlowSteadyState", showIf: cfg => (cfg.windShiftSlowClass || "ExponentialSmoother") === "KalmanSmoother" },
     ],
     inputs: [
-      { type: "polar", id: "groundWind" }
+      { type: "polar", id: "groundWind", svgRole: "groundWind" }
     ],
     outputs: [
-      { type: "delta", id: "windShiftFast" },
-      { type: "delta", id: "windShiftSlow" },
+      { type: "delta", id: "windShiftFast", svgRole: "windShiftFast" },
+      { type: "delta", id: "windShiftSlow", svgRole: "windShiftSlow" },
       { type: "delta", id: "windShift" }
     ]
   },
@@ -753,6 +668,22 @@ function formatStateValue(type, data) {
   }
 }
 
+// Maps SVG element id (= svgRole) to the CSS custom property controlling its stroke colour.
+// Used by createDataTable to look up the swatch colour from item.svgRole.
+const _svgIdColorVar = {
+  apparentWind:   "--apparentWind-color",
+  correctedWind:  "--correctedWind-color",
+  trueWind:       "--trueWind-color",
+  groundWind:     "--groundWind-color",
+  boatSpeed:      "--boatSpeed-color",
+  groundSpeed:    "--groundSpeed-color",
+  heelVector:     "--heelVector-color",
+  mastMoveVector: "--mastMoveVector-color",
+  windShiftFast:  "--windShiftFast-color",
+  windShiftSlow:  "--windShiftSlow-color",
+  windShift:      "--windShift-color",
+};
+
 // Build a 2-column table (Name | Value) for an array of typed descriptors.
 function createDataTable(items) {
   const table = document.createElement("table");
@@ -763,6 +694,13 @@ function createDataTable(items) {
     if (isNotReady(data)) row.className = "not-ready";
     const nameCell = row.insertCell();
     nameCell.textContent = meta[item.id]?.displayName ?? item.id;
+    const colorVar = item.svgRole && _activeSvgIds.has(item.svgRole) ? _svgIdColorVar[item.svgRole] : null;
+    if (colorVar) {
+      const swatch = document.createElement("span");
+      swatch.className = "vector-swatch";
+      swatch.style.backgroundColor = `var(${colorVar})`;
+      nameCell.appendChild(swatch);
+    }
     const valCell = row.insertCell();
     valCell.textContent = data ? formatStateValue(item.type, data) : "—";
   });
@@ -770,7 +708,6 @@ function createDataTable(items) {
 }
 
 // Build the interactive control for a single config parameter.
-// readOnly: when true, source (sourceOf) params are displayed as plain text.
 function createParamControl(key, meta, value, readOnly) {
   const container = document.createElement("span");
   if (meta.type === "boolean") {
@@ -823,41 +760,6 @@ function createParamControl(key, meta, value, readOnly) {
     sel.value = value !== undefined && value !== null ? value : (meta.options && meta.options[0] ? meta.options[0].value : "");
     sel.onchange = () => updateConfigAtPath(key, sel.value);
     container.appendChild(sel);
-  } else if (meta.sourceOf) {
-    if (readOnly) {
-      // Display-only: show the current source value as plain text.
-      const span = document.createElement("span");
-      span.className = "form-control-plaintext form-control-sm d-inline-block";
-      span.style.width = "180px";
-      span.textContent = value || "(any)";
-      container.appendChild(span);
-    } else {
-      // Source selector: build a <select> from the sources array on the state item.
-      const sel = document.createElement("select");
-      sel.className = "form-select form-select-sm d-inline-block";
-      sel.style.width = "180px";
-      // Always offer an empty option meaning "any source / no filter".
-      const blankOpt = document.createElement("option");
-      blankOpt.value = "";
-      blankOpt.textContent = "(any)";
-      sel.appendChild(blankOpt);
-      // Populate from the state item's sources array.
-      // All smoother types (MessageSmoother, PolarSmoother) expose sources at state.sources.
-      const stateItem = getStateItem(meta.sourceOf);
-      let sources = [];
-      if (stateItem && stateItem.state) {
-        sources = stateItem.state.sources ?? [];
-      }
-      sources.forEach(src => {
-        const opt = document.createElement("option");
-        opt.value = src;
-        opt.textContent = src;
-        sel.appendChild(opt);
-      });
-      sel.value = value || "";
-      sel.onchange = () => updateConfigAtPath(key, sel.value);
-      container.appendChild(sel);
-    }
   } else {
     const inp = document.createElement("input");
     inp.type  = "text";
@@ -913,8 +815,6 @@ function getCannotActivateReasons(cfg) {
     const key  = typeof entry === "string" ? entry : entry.key;
     const meta = paramMeta[key];
     if (!meta) return;
-    // Source dropdowns are optional — "(any)" means accept all sources.
-    if (meta.sourceOf) return;
     // Booleans always have a valid value.
     if (meta.type === "boolean") return;
 
@@ -1129,6 +1029,7 @@ function render() {
 // Full render: rebuilds nav, all panel sections, and SVG graphic.
 // Call this when the active step changes or after a config change.
 function renderAll() {
+  _computeDerivedPolars(config || {}, state);
   const step = steps.find(s => s.id === currentStepId) || steps[0];
   buildNav();
   renderSVG();
@@ -1146,6 +1047,7 @@ async function tick() {
     return;
   }
   normaliseState(data);
+  _computeDerivedPolars(config || {}, state);
   render();
 }
 

@@ -1,29 +1,57 @@
 /* --- CSS Variables for SVG vector colours --- */
 :root {
-  --signalk-blue: #003399;
   --signalk-sidebar-bg: #1C2B33;
-  --signalk-sidebar-active: #253D4A;
-  --signalk-amber: #FFB300;
-  --signalk-green: #43A047;
-  --signalk-text-secondary: #546E7A;
-  --groundWind-color: #1976d262;
-  --windShiftFast-color: #29B6F6;
-  --windShiftSlow-color: #78909C;
-  --windShift-color: #E53935;
+
+  /* Group 1 — Wind processing chain (warm → cool progression) */
+  --apparentWind-color:  #FFB300;   /* amber  — raw sensor            */
+  --correctedWind-color: #00897B;   /* teal   — intermediate          */
+  --trueWind-color:      #1565C0;   /* royal blue — final true wind   */
+  --groundWind-color:    #3949AB;   /* indigo — ground-frame output   */
+
+  /* Group 2 — Motion vectors (blue-grey, secondary) */
+  --boatSpeed-color:     #546E7A;   /* slate       — through water    */
+  --groundSpeed-color:   #90A4AE;   /* light slate — over ground      */
+
+  /* Group 3 — Geometry / auxiliary (earth tones, physical) */
+  --heelVector-color:     #795548;  /* brown       — mast tilt        */
+  --mastMoveVector-color: #A1887F;  /* light brown — sensor velocity  */
+
+  /* Group 4 — Wind shift indicators */
+  --windShiftFast-color: #00ACC1;   /* cyan  — fast-responding mean   */
+  --windShiftSlow-color: #607D8B;   /* steel — slow reference mean    */
+  --windShift-color:     #E53935;   /* red   — shift alert signal     */
 }
 
 /* --- SVG vector colours by element ID --- */
-#groundSpeed     { stroke: var(--signalk-sidebar-bg);    stroke-width: 1; }
-#boatSpeed       { stroke: var(--signalk-sidebar-active); stroke-width: 1; }
-#apparentWind    { stroke: var(--signalk-amber); }
-#trueWind        { stroke: var(--signalk-blue); }
-#groundWind      { stroke: var(--groundWind-color); }
-#correctedWind   { stroke: var(--signalk-green); }
-#heelVector,
-#mastMoveVector  { stroke: var(--signalk-sidebar-bg); stroke-width: 1; }
-#windShiftFast   { stroke: var(--windShiftFast-color); }
-#windShiftSlow   { stroke: var(--windShiftSlow-color); }
-#windShift       { stroke: var(--windShift-color); stroke-width: 3; }
+/* Group 1 — Wind chain: 2px, full opacity */
+#apparentWind  { stroke: var(--apparentWind-color);  stroke-width: 2; }
+#correctedWind { stroke: var(--correctedWind-color); stroke-width: 2; }
+#trueWind      { stroke: var(--trueWind-color);      stroke-width: 2; }
+#groundWind    { stroke: var(--groundWind-color);    stroke-width: 2; }
+
+/* Group 2 — Motion vectors: 1.5px */
+#boatSpeed     { stroke: var(--boatSpeed-color);     stroke-width: 1.5; }
+#groundSpeed   { stroke: var(--groundSpeed-color);   stroke-width: 1.5; }
+
+/* Group 3 — Geometry: 1px */
+#heelVector     { stroke: var(--heelVector-color);     stroke-width: 1; }
+#mastMoveVector { stroke: var(--mastMoveVector-color); stroke-width: 1; }
+
+/* Group 4 — Wind shift: 2px fast/slow, 3px alert */
+#windShiftFast { stroke: var(--windShiftFast-color); stroke-width: 2; }
+#windShiftSlow { stroke: var(--windShiftSlow-color); stroke-width: 2; }
+#windShift     { stroke: var(--windShift-color);     stroke-width: 3; }
+
+/* --- Vector color swatches in inputs/outputs tables --- */
+.vector-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-left: 6px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
 
 /* --- SVG canvas --- */
 svg {

@@ -1,7 +1,7 @@
 const { Polar, PolarSmoother, SmoothedAngle, Reporter, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother, PassThroughSmoother, MessageSmoother, MessageHandler, createSmoothedPolar, createSmoothedHandler } = require('signalkutilities');
 
 module.exports = function (app) {
-  const currentVersion = "3.3";
+  const currentVersion = "3.4";
 
   let options = {};
   let changedOptions = {};
@@ -20,7 +20,6 @@ module.exports = function (app) {
     // Output Options
     'calculateGroundWind': false,
     'backCalculateApparentWind': true,
-    'preventDuplication': true,
 
     // Parameters
     'sensorMisalignment': 0,
@@ -44,14 +43,6 @@ module.exports = function (app) {
     'attitudeSmootherTimeSpan': 1,
     'attitudeSmootherSteadyState': 0.2,
 
-    // Data Sources
-    'headingSource': '',
-    'attitudeSource': '',
-    'boatSpeedSource': '',
-    'leewaySource': '',
-    'windSpeedSource': '',
-    'rotationSource': '',
-    'groundSpeedSource': '',
 
     // Wind Shift Detection
     'detectWindShift': false,
@@ -160,6 +151,16 @@ module.exports = function (app) {
     }
     else if (temp.version === "3.2") {
       options = clampOptions({ ...defaultOptions, ...temp });
+      options.version = currentVersion;
+      saveOptions();
+      return;
+    }
+    else if (temp.version === "3.3") {
+      // Strip obsolete source-selection fields — Signal K server manages source priorities in v2.
+      options = clampOptions({ ...defaultOptions, ...temp });
+      const obsolete = ['headingSource', 'attitudeSource', 'boatSpeedSource', 'leewaySource',
+                        'windSpeedSource', 'rotationSource', 'groundSpeedSource', 'preventDuplication'];
+      obsolete.forEach(k => delete options[k]);
       options.version = currentVersion;
       saveOptions();
       return;
@@ -308,15 +309,12 @@ module.exports = function (app) {
     });
 
     // Placeholder endpoint for discovering available sources per Signal K path.
-    // In a later phase this should query the Signal K server's data model.
+    // Source selection is now managed by the Signal K server natively.
     router.get('/sources', (req, res) => {
       const pathParam = req.query && req.query.path;
       if (!pathParam) {
         return res.status(400).json({ error: "Missing 'path' query parameter" });
       }
-
-      // TODO: Implement real source discovery using the Signal K server API.
-      // For now we return an empty list so the front-end API shape is stable.
       res.json({ path: pathParam, sources: [] });
     });
 
@@ -397,7 +395,6 @@ module.exports = function (app) {
     heading = createSmoothedHandler({
       id: "heading",
       path: "navigation.headingTrue",
-      source: options.headingSource,
       subscribe: true,
       app,
       pluginId: plugin.id,
@@ -409,7 +406,6 @@ module.exports = function (app) {
     mast = createSmoothedHandler({
       id: "mast",
       path: options.rotationPath,
-      source: options.rotationSource,
       subscribe: true,
       app,
       pluginId: plugin.id,
@@ -421,7 +417,6 @@ module.exports = function (app) {
     attitude = createSmoothedHandler({
       id: "attitude",
       path: "navigation.attitude",
-      source: options.attitudeSource,
       subscribe: true,
       app,
       pluginId: plugin.id,
@@ -430,8 +425,8 @@ module.exports = function (app) {
     });
     sensorSpeed = new Polar(app, plugin.id, "sensorSpeed");
     sensorSpeed.setMeta({ displayName: "Speed of sensor", plane: "Boat" });
-    sensorSpeed.configureMagnitude("environment.wind.speedApparent", "", false);
-    sensorSpeed.configureAngle("environment.wind.angleApparent", "", false);
+    sensorSpeed.configureMagnitude("environment.wind.speedApparent");
+    sensorSpeed.configureAngle("environment.wind.angleApparent");
 
     // Compute sensorSpeed exactly once per attitude sample, using the correct deltaT
     // between consecutive attitude updates. This avoids the problem of calculate()
@@ -511,12 +506,12 @@ module.exports = function (app) {
     for (const p of [misalignIn, misalignOut, mastRotIn, mastRotOut, mastHeelIn, mastHeelOut,
       mastMoveIn, mastMoveOut, upwashIn, upwashOut, leewayIn, leewayOut,
       trueWindIn, backCalcOut, groundWindIn]) {
-      p.configureMagnitude("environment.wind.speedApparent", "", false);
-      p.configureAngle("environment.wind.angleApparent", "", false);
+      p.configureMagnitude("environment.wind.speedApparent");
+      p.configureAngle("environment.wind.angleApparent");
     }
     for (const p of [heightIn, heightOut]) {
-      p.configureMagnitude("environment.wind.speedTrue", "", false);
-      p.configureAngle("environment.wind.angleTrueWater", "", false);
+      p.configureMagnitude("environment.wind.speedTrue");
+      p.configureAngle("environment.wind.angleTrueWater");
     }
 
     // Scalar delta for the computed upwash correction angle (radians).
@@ -527,7 +522,7 @@ module.exports = function (app) {
       value: null,
       stale: true,
       meta: { displayName: "Calculated upwash", units: "rad" },
-      get state() { return { isStale: this.stale, frequency: null, sources: [] }; },
+      get state() { return { ready: !this.stale, isStale: this.stale, frequency: null }; },
       report() {
         return { id: this.id, value: this.value, state: this.state };
       }
@@ -539,14 +534,11 @@ module.exports = function (app) {
       pathMagnitude: "environment.wind.speedApparent",
       pathAngle: "environment.wind.angleApparent",
       subscribe: true,
-      sourceMagnitude: options.windSpeedSource,
-      sourceAngle: options.windSpeedSource,
       app: app,
       pluginId: plugin.id,
       SmootherClass,
       smootherOptions,
       meta: { displayName: "Apparent Wind", plane: "Boat" },
-      passOn: !options.preventDuplication,
     });
 
 
@@ -556,7 +548,6 @@ module.exports = function (app) {
     boatSpeedHandler = createSmoothedHandler({
       id: "boatSpeed",
       path: "navigation.speedThroughWater",
-      source: options.boatSpeedSource,
       subscribe: true,
       app,
       pluginId: plugin.id,
@@ -567,7 +558,6 @@ module.exports = function (app) {
     leewayHandler = createSmoothedHandler({
       id: "leeway",
       path: "navigation.leewayAngle",
-      source: options.leewaySource,
       subscribe: true,
       app,
       pluginId: plugin.id,
@@ -591,14 +581,11 @@ module.exports = function (app) {
       pathMagnitude: "navigation.speedOverGround",
       pathAngle: "navigation.courseOverGroundTrue",
       subscribe: true,
-      sourceMagnitude: options.groundSpeedSource,
-      sourceAngle: options.groundSpeedSource,
       app,
       pluginId: plugin.id,
       SmootherClass,
       smootherOptions,
       meta: { displayName: "Ground Speed", plane: "Ground" },
-      passOn: true,
       angleRange: '0to2pi'
     });
 
@@ -617,12 +604,10 @@ module.exports = function (app) {
     trueWind.angleRange = '-piToPi';
 
     // Wind shift detection: two SmoothedAngles subscribing to the plugin's own groundWind output.
-    // A fake pluginId prevents the own-source echo guard from blocking the plugin's messages;
-    // source: plugin.id ensures only this plugin's groundWind deltas are accepted.
-    windShiftFast = new SmoothedAngle(app, 'windShiftFastInternal', 'windShiftFast',
+    // subscribeOptions:{} disables excludeSelf so the plugin's own directionTrue output is received.
+    windShiftFast = new SmoothedAngle(app, plugin.id, 'windShiftFast',
       'environment.wind.directionTrue', {
-      source: plugin.id,
-      passOn: true,
+      subscribeOptions: {},
       angleRange: '0to2pi',
       meta: { displayName: 'Fast mean wind direction', plane: 'Ground', units: 'rad', displayUnits: { category: 'angle' } },
       SmootherClass: resolveSmootherClass(options.windShiftFastClass),
@@ -631,10 +616,9 @@ module.exports = function (app) {
     );
     windShiftFast.id = 'windShiftFast';
 
-    windShiftSlow = new SmoothedAngle(app, 'windShiftSlowInternal', 'windShiftSlow',
+    windShiftSlow = new SmoothedAngle(app, plugin.id, 'windShiftSlow',
       'environment.wind.directionTrue', {
-      source: plugin.id,
-      passOn: true,
+      subscribeOptions: {},
       angleRange: '0to2pi',
       meta: { displayName: 'Slow mean wind direction (reference)', plane: 'Ground', units: 'rad', displayUnits: { category: 'angle' } },
       SmootherClass: resolveSmootherClass(options.windShiftSlowClass),
@@ -644,7 +628,7 @@ module.exports = function (app) {
     windShiftSlow.id = 'windShiftSlow';
 
     windShift = new MessageHandler(app, plugin.id, 'windShift');
-    windShift.configure('environment.wind.directionTrue.trend.shift', '', false);
+    windShift.configure('environment.wind.directionTrue.trend.shift');
     MessageHandler.setMeta(app, plugin.in, 'environment.wind.directionTrue.trend.shift', { displayName: 'Wind Shift', description: 'Wind shift: angle difference between fast and slow mean wind directions', plane: 'Ground', units: 'rad', displayUnits: { category: 'angle' } });
 
     if (options.detectWindShift) sendWindShiftMeta();
@@ -774,6 +758,7 @@ module.exports = function (app) {
       // Always compute the angle for display (even when correction is disabled).
       const computedUpwash = approximateUpwash(calculatedWind.angle);
       upwashAngle.value = computedUpwash;
+      upwashAngle.stale = false;
       if (options.correctForUpwash) {
         calculatedWind.rotate(-computedUpwash);
       }
@@ -856,35 +841,8 @@ module.exports = function (app) {
         const value = changedOptions[key];
         options[key] = value;
         switch (key) {
-          case 'headingSource':
-            heading.handler.source = value;
-            break;
-          case 'attitudeSource':
-            attitude.handler.source = value;
-            break;
-          case 'boatSpeedSource':
-            boatSpeedHandler.handler.source = value;
-            break;
-          case 'leewaySource':
-            leewayHandler.handler.source = value;
-            break;
-          case 'windSpeedSource':
-            apparentWind.polar.magnitudeHandler.source = value;
-            apparentWind.polar.angleHandler.source = value;
-            break;
           case 'rotationPath':
             mast.handler.path = value;
-            break;
-          case 'rotationSource':
-            mast.handler.source = value;
-            break;
-          case 'groundSpeedSource':
-            groundSpeed.polar.magnitudeHandler.source = value;
-            groundSpeed.polar.angleHandler.source = value;
-            break;
-          case 'preventDuplication':
-            apparentWind.polar.magnitudeHandler.passOn = !value;
-            apparentWind.polar.angleHandler.passOn = !value;
             break;
           case 'smootherClass':
           case 'smootherTau':
