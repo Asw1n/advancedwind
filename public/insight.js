@@ -404,7 +404,7 @@ const stepConfigs = {
         { type: "polar", id: "apparentWind.smoothed", svgRole: "apparentWind" },
         { type: "delta", id: "boatSpeed.smoothed" }
       ];
-      if (cfg.correctForMastHeel || cfg.correctForMastMovement)
+      if (cfg.correctForMastHeel || cfg.correctForMastMovement || cfg.correctForHeight)
         items.push({ type: "attitude", id: "attitude.smoothed" });
       if (cfg.calculateGroundWind) {
         items.push({ type: "delta",  id: "heading.smoothed" });
@@ -543,10 +543,18 @@ const stepConfigs = {
     outputs: [{ type: "polar", id: "trueWind", svgRole: "trueWind" }]
   },
   height: {
-    description: "Scales true wind speed to a reference height of 10 m as used in weather forecasts and in polars.",
+    description: "Scales true wind speed to a reference height of 10 m as used in weather forecasts and in polars. Sensor height is first reduced by mast heel (roll/pitch) before applying the wind gradient.",
     correctionFlag: "correctForHeight",
     parameters: ["heightAboveWater", "windExponent"],
-    inputs:  [{ type: "polar", id: "heightIn", svgRole: "trueWind" }],
+    inputs: (cfg) => {
+      const items = [{ type: "polar", id: "heightIn", svgRole: "trueWind" }];
+      if (cfg.correctForHeight)
+        items.push({ type: "attitude", id: "attitude.smoothed", svgRole: "heelVector" });
+      return items;
+    },
+    svgExtra: (cfg) => cfg.correctForHeight
+      ? [{ id: "heelVector", svgRole: "heelVector" }]
+      : [],
     outputs: (cfg) => cfg.correctForHeight
       ? [{ type: "polar", id: "heightOut", svgRole: "correctedWind" }]
       : [{ type: "polar", id: "heightOut" }]

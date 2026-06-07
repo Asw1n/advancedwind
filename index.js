@@ -828,7 +828,12 @@ module.exports = function (app) {
       }
 
       function approximateWindGradient() {
-        return Math.pow((10 / options.heightAboveWater), options.windExponent);
+        let h = options.heightAboveWater;
+        if (attitude.ready) {
+          const hEff = h * Math.cos(attitude.value.roll) * Math.cos(attitude.value.pitch);
+          if (hEff > 0) h = hEff;
+        }
+        return Math.pow(10 / h, options.windExponent);
       }
 
     }

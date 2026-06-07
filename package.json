@@ -15,7 +15,8 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
-    "test"
+    "test",
+    "docs"
   ],
   "scripts": {
     "test": "node --test test/plugin.test.js"
