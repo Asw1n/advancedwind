@@ -42,7 +42,7 @@
   ],
   "signalk-plugin-enabled-by-default": false,
   "signalk": {
-    "appIcon": "./icon.png",
+    "appIcon": "./public/icon.png",
     "displayName": "Advanced Wind",
     "screenshots": [
       "./docs/overview.png",
