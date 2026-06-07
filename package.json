@@ -45,11 +45,11 @@
     "appIcon": "./icon.png",
     "displayName": "Advanced Wind",
     "screenshots": [
-      "https://raw.githubusercontent.com/Asw1n/advancedwind/main/docs/overview.png",
-      "https://raw.githubusercontent.com/Asw1n/advancedwind/main/docs/inputs.png",
-      "https://raw.githubusercontent.com/Asw1n/advancedwind/main/docs/heel.png",
-      "https://raw.githubusercontent.com/Asw1n/advancedwind/main/docs/upwash.png",
-      "https://raw.githubusercontent.com/Asw1n/advancedwind/main/docs/windshift.png"
+      "./docs/overview.png",
+      "./docs/inputs.png",
+      "./docs/heel.png",
+      "./docs/upwash.png",
+      "./docs/windshift.png"
     ]
   },
   "dependencies": {
