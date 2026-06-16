@@ -209,6 +209,7 @@ let state = {
   tablesById: {}
 };
 let config = null;
+let _prevWarningsText = null;
 
 // Navigation / steps
 const steps = [
@@ -636,6 +637,10 @@ function _parseDecimals(displayFormat) {
   return dot < 0 ? 0 : displayFormat.length - dot - 1;
 }
 
+// Cache compiled formula functions keyed by formula string to avoid
+// allocating a new Function object on every formatted cell.
+const _formulaCache = new Map();
+
 function _formatUnit(value, displayUnits, rawUnits) {
   if (typeof value !== "number") return "—";
   // Default displayUnits by SI unit; SK server preferences override these.
@@ -645,8 +650,11 @@ function _formatUnit(value, displayUnits, rawUnits) {
                                         { formula: "value",                 symbol: rawUnits, displayFormat: "0.2" };
   const du = { ...defaults, ...displayUnits };
   // Formula is a Math.js expression from the trusted local SK server (e.g. "value * 1.94384").
+  // Compile once and cache to avoid re-allocating a Function on every formatted value.
+  let fn = _formulaCache.get(du.formula);
   // eslint-disable-next-line no-new-func
-  const converted = new Function('value', 'return ' + du.formula)(value);
+  if (!fn) { fn = new Function('value', 'return ' + du.formula); _formulaCache.set(du.formula, fn); }
+  const converted = fn(value);
   return converted.toFixed(_parseDecimals(du.displayFormat)) + ' ' + du.symbol;
 }
 
@@ -699,6 +707,8 @@ function createDataTable(items) {
   items.forEach(item => {
     const data = getStateItem(item);
     const row  = table.insertRow();
+    row.dataset.itemId   = item.id;
+    row.dataset.itemType = item.type;
     if (isNotReady(data)) row.className = "not-ready";
     const nameCell = row.insertCell();
     nameCell.textContent = meta[item.id]?.displayName ?? item.id;
@@ -1002,6 +1012,64 @@ function renderPanelLive(step) {
   }
 }
 
+// Update value cells and row classes in an already-built table without recreating DOM nodes.
+function _updateDataTable(tableEl, items) {
+  if (!tableEl || !items) return;
+  const rows = tableEl.rows;
+  items.forEach((item, i) => {
+    const row = rows[i];
+    if (!row) return;
+    const data = getStateItem(item);
+    row.className = isNotReady(data) ? "not-ready" : "";
+    row.cells[1].textContent = data ? formatStateValue(item.type, data) : "—";
+  });
+}
+
+// Fast tick path: updates value cells and warnings in place without rebuilding tables.
+// renderPanelLive (full rebuild) is called from renderAll on step/config changes.
+function renderPanelLiveFast(step) {
+  const inputsEl   = document.getElementById("panel-inputs");
+  const outputsEl  = document.getElementById("panel-outputs");
+  const warningsEl = document.getElementById("panel-warnings");
+  if (!inputsEl) return;
+
+  const cfg = stepConfigs[step.id];
+  const currentCfg = config || {};
+  const cfgInputs  = cfg && (typeof cfg.inputs  === "function" ? cfg.inputs(currentCfg)  : cfg.inputs);
+  const cfgOutputs = cfg && (typeof cfg.outputs === "function" ? cfg.outputs(currentCfg) : cfg.outputs);
+
+  _updateDataTable(inputsEl.querySelector('table'),  cfgInputs  || []);
+  _updateDataTable(outputsEl.querySelector('table'), cfgOutputs || []);
+
+  // Warnings: only touch the DOM when the content has actually changed.
+  const notReadyReasons = [];
+  (cfgInputs || []).forEach(item => {
+    const data = getStateItem(item);
+    if (isNotReady(data)) {
+      const label = meta[item.id]?.displayName ?? item.id;
+      notReadyReasons.push(`"${label}" — ${getNotReadyReason(data)}`);
+    }
+  });
+  if (cfg && cfg.correctionFlag) {
+    notReadyReasons.push(...getCannotActivateReasons(cfg));
+  }
+  const warningsText = notReadyReasons.join('\n');
+  if (warningsText === _prevWarningsText) return;
+  _prevWarningsText = warningsText;
+  warningsEl.innerHTML = "";
+  if (notReadyReasons.length > 0) {
+    warningsEl.appendChild(sceneSectionHeading("Warnings"));
+    const list = document.createElement("ul");
+    list.className = "list-unstyled text-danger small ps-3";
+    notReadyReasons.forEach(r => {
+      const li = document.createElement("li");
+      li.textContent = r;
+      list.appendChild(li);
+    });
+    warningsEl.appendChild(list);
+  }
+}
+
 function buildNav() {
   const nav = document.getElementById("insight-nav");
   if (!nav) return;
@@ -1031,7 +1099,7 @@ function buildNav() {
 function render() {
   const step = steps.find(s => s.id === currentStepId) || steps[0];
   renderSVG();
-  renderPanelLive(step);
+  renderPanelLiveFast(step);
 }
 
 // Full render: rebuilds nav, all panel sections, and SVG graphic.
@@ -1039,6 +1107,7 @@ function render() {
 function renderAll() {
   _computeDerivedPolars(config || {}, state);
   const step = steps.find(s => s.id === currentStepId) || steps[0];
+  _prevWarningsText = null;  // force warnings rebuild after step/config change
   buildNav();
   renderSVG();
   renderPanel(step);

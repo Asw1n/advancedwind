@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
-## [Unreleased] - 2026-06-07
+## [2.7.1] - 2026-06-17
 
 ### Added
 - Vector color legend: each vector in the inputs and outputs tables now shows a color swatch matching its line in the SVG diagram, making it easy to identify which value corresponds to which vector.
@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Height / 10 m correction now accounts for mast heel: the sensor's effective vertical height is reduced by roll and pitch before the wind gradient is applied, giving a more accurate 10 m normalisation when the boat is heeled. The heel vector is also shown in the Height scene when the correction is enabled.
 
 ### Changed
+- Moving average smoother is now O(1) in both CPU and memory: it no longer slows down or uses more memory as the window size grows.
 - Revised SVG vector color scheme: all vectors now have distinct, purposeful colors grouped by role — wind chain (amber → teal → blue → indigo), motion vectors (blue-grey), geometry vectors (earth tones), and wind shift indicators (cyan/steel/red). Line weights are also differentiated by group.
 - Wind shift vectors (fast/slow) are drawn at a fixed length (45% of diagram height) rather than scaling with wind speed, making the direction comparison readable regardless of conditions.
 

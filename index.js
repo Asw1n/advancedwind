@@ -5,6 +5,7 @@ module.exports = function (app) {
 
   let options = {};
   let changedOptions = {};
+  let hasChangedOptions = false;
   const defaultOptions = {
     // version
     'version': currentVersion,
@@ -299,9 +300,10 @@ module.exports = function (app) {
       for (const key of Object.keys(incoming)) {
         changedOptions[key] = clamped[key];
       }
+      hasChangedOptions = true;
       // Drain changedOptions immediately so a source change takes effect even when
       // calculate() is deadlocked (e.g. a stale source filter blocking all deltas).
-      if (isRunning && typeof applyOptionChanges === 'function' && Object.keys(changedOptions).length) {
+      if (isRunning && typeof applyOptionChanges === 'function' && hasChangedOptions) {
         try { applyOptionChanges(); } catch (e) { app.debug(`applyOptionChanges (PUT /settings) failed: ${e.message}`); }
       }
       // Return the full merged config (with bounds) so the client can update itself.
@@ -466,7 +468,8 @@ module.exports = function (app) {
       const now = Date.now();
       if (!attLastTime) {
         attLastTime = now;
-        attPrevious = { ...current };
+        if (!attPrevious) attPrevious = { roll: current.roll, pitch: current.pitch };
+        else { attPrevious.roll = current.roll; attPrevious.pitch = current.pitch; }
         return;
       }
       const deltaT = (now - attLastTime) / 1000;
@@ -478,7 +481,8 @@ module.exports = function (app) {
         x: ((current.pitch - attPrevious.pitch) / deltaT) * r,
         y: ((current.roll - attPrevious.roll) / deltaT) * r
       });
-      attPrevious = { ...current };
+      attPrevious.roll = current.roll;
+      attPrevious.pitch = current.pitch;
     };
 
     // Snapshot polars for per-step before/after inspection
@@ -710,7 +714,7 @@ module.exports = function (app) {
 
     function calculate() {
       // Re-read options at runtime so /config changes take effect
-      if (Object.keys(changedOptions).length) applyOptionChanges();
+      if (hasChangedOptions) applyOptionChanges();
 
       calculatedWind.copyFrom(apparentWind);
 
@@ -822,20 +826,20 @@ module.exports = function (app) {
 
       Polar.send(app, plugin.id, outputsToSend);
 
-      function approximateUpwash(angle) {
-        if (isNaN(options.upwashSlope) || isNaN(options.upwashOffset)) return 0;
-        return (options.upwashSlope * angle + options.upwashOffset * Math.PI / 180) * Math.max(0, Math.cos(angle));
-      }
+    }
 
-      function approximateWindGradient() {
-        let h = options.heightAboveWater;
-        if (attitude.ready) {
-          const hEff = h * Math.cos(attitude.value.roll) * Math.cos(attitude.value.pitch);
-          if (hEff > 0) h = hEff;
-        }
-        return Math.pow(10 / h, options.windExponent);
-      }
+    function approximateUpwash(angle) {
+      if (isNaN(options.upwashSlope) || isNaN(options.upwashOffset)) return 0;
+      return (options.upwashSlope * angle + options.upwashOffset * Math.PI / 180) * Math.max(0, Math.cos(angle));
+    }
 
+    function approximateWindGradient() {
+      let h = options.heightAboveWater;
+      if (attitude.ready) {
+        const hEff = h * Math.cos(attitude.value.roll) * Math.cos(attitude.value.pitch);
+        if (hEff > 0) h = hEff;
+      }
+      return Math.pow(10 / h, options.windExponent);
     }
 
     applyOptionChanges = function () {
@@ -914,6 +918,7 @@ module.exports = function (app) {
         }
       }
 
+      hasChangedOptions = false;
       saveOptions();
     };
   }

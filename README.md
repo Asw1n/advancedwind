@@ -87,6 +87,8 @@ $$\text{speed}_{10\,\text{m}} = \text{speed}_{\text{sensor}} \times \left(\frac{
 
 The default exponent α = 0.14 is appropriate for open water with neutral atmospheric stability. The configured sensor height above the waterline is also used for the mast movement correction.
 
+When the mast heel correction is also enabled, the effective sensor height is reduced to account for the fact that a heeled mast brings the sensor closer to the water surface, giving a more accurate normalisation.
+
 ---
 
 ## Outputs
