@@ -375,6 +375,7 @@ module.exports = function (app) {
   plugin.start = () => {
     app.debug("plugin started");
     app.setPluginStatus("Starting");
+
     // Store options at module scope so runtime changes via /config
     // can be picked up by the calculation logic. Guard against
     // non-object values coming from a corrupted configuration file.

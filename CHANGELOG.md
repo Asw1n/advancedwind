@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
+## [2.7.2] - 2026-06-18
+
+### Fixed
+- The plugin now requires Signal K server v2.28 or later. Earlier versions did not filter out the plugin's own output when subscribing to Signal K paths, which caused a feedback loop and an out-of-memory crash within minutes of enabling the plugin (particularly with *Back-calculate apparent wind* enabled). The Signal K app store will block installation on unsupported server versions.
+- Moving average smoothing now performs correctly at large window sizes. A dependency update ensures users receive the fixed implementation on a fresh install.
+
 ## [2.7.1] - 2026-06-17
 
 ### Added
