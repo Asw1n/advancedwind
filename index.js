@@ -222,6 +222,7 @@ module.exports = function (app) {
   let windShiftFast = null;  // SmoothedAngle on environment.wind.directionTrue (fast EMA)
   let windShiftSlow = null;  // SmoothedAngle on environment.wind.directionTrue (slow EMA / reference)
   let windShift = null;  // inline delta: angle diff (rad) between fast and slow means
+  let windShiftLastSend = 0;  // timestamp (ms) of last wind-shift SK bus write — used to throttle to 1 Hz
   // Hoisted so the PUT /settings handler can drain changedOptions immediately.
   // Without this, a stale source filter deadlocks the cycle: calculate() only
   // runs after the smoother samples, and the smoother won't sample while the
@@ -646,16 +647,20 @@ module.exports = function (app) {
       if (typeof fast !== 'number' || typeof slow !== 'number') return;
       const raw = fast - slow;
       windShift.value = ((raw + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
-      app.handleMessage(plugin.id, {
-        context: 'vessels.self',
-        updates: [{
-          $source: plugin.id, values: [
-            { path: 'environment.wind.directionTrue.trend.fast', value: fast },
-            { path: 'environment.wind.directionTrue.trend.slow', value: slow },
-            { path: 'environment.wind.directionTrue.trend.shift', value: windShift.value },
-          ]
-        }]
-      });
+      const now = Date.now();
+      if (now - windShiftLastSend >= 1000) {
+        windShiftLastSend = now;
+        app.handleMessage(plugin.id, {
+          context: 'vessels.self',
+          updates: [{
+            $source: plugin.id, values: [
+              { path: 'environment.wind.directionTrue.trend.fast', value: fast },
+              { path: 'environment.wind.directionTrue.trend.slow', value: slow },
+              { path: 'environment.wind.directionTrue.trend.shift', value: windShift.value },
+            ]
+          }]
+        });
+      }
     };
 
     //# endregion initialization of paths
@@ -871,7 +876,17 @@ module.exports = function (app) {
             applyStalenessDetection(value);
             break;
           case 'detectWindShift':
-            if (value) sendWindShiftMeta();
+            if (value) {
+              sendWindShiftMeta();
+            } else {
+              MessageHandler.clear(app, plugin.id, [windShiftFast, windShiftSlow, windShift]);
+            }
+            break;
+          case 'backCalculateApparentWind':
+            if (!value) Polar.clear(app, plugin.id, [calculatedWind]);
+            break;
+          case 'calculateGroundWind':
+            if (!value) Polar.clear(app, plugin.id, [groundWind]);
             break;
           case 'windShiftFastClass':
           case 'windShiftFastTau':
@@ -933,6 +948,11 @@ module.exports = function (app) {
     return new Promise((resolve, reject) => {
       try {
         isRunning = false;
+        // Clear all active output paths from the SK bus before teardown.
+        if (trueWind) Polar.clear(app, plugin.id, [trueWind]);
+        if (options.backCalculateApparentWind && calculatedWind) Polar.clear(app, plugin.id, [calculatedWind]);
+        if (options.calculateGroundWind && groundWind) Polar.clear(app, plugin.id, [groundWind]);
+        if (options.detectWindShift && windShiftFast) MessageHandler.clear(app, plugin.id, [windShiftFast, windShiftSlow, windShift]);
         reportFull = null;
         heading = heading?.terminate(app);
         mast = mast?.terminate(app);
