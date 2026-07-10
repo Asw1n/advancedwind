@@ -62,7 +62,7 @@
         <img src="icon.png" alt="Advanced Wind" style="height:48px;width:auto;">
         <span class="app-title">Advanced Wind</span>
       </a>
-      <button class="navbar-toggler sidebar-toggler d-md-down-none ms-2" type="button" id="sidebarToggler">
+      <button class="navbar-toggler sidebar-toggler ms-2" type="button" id="sidebarToggler">
         <span class="navbar-toggler-icon"></span>
       </button>
     </div>
@@ -125,9 +125,21 @@
       document.body.classList.toggle('sidebar-minimized');
       document.body.classList.toggle('brand-minimized');
     });
-    // Navbar sidebar-toggler (for smaller screens): toggles sidebar-hidden on <body>.
+    // Navbar sidebar-toggler: on mobile (<768px) toggles sidebar-mobile-show on <body>
+    // (off-canvas reveal); on desktop toggles sidebar-hidden (collapse to icon-width).
+    const isMobile = () => window.matchMedia('(max-width: 767.98px)').matches;
     document.getElementById('sidebarToggler').addEventListener('click', () => {
-      document.body.classList.toggle('sidebar-hidden');
+      if (isMobile()) {
+        document.body.classList.toggle('sidebar-mobile-show');
+      } else {
+        document.body.classList.toggle('sidebar-hidden');
+      }
+    });
+    // Auto-close sidebar on mobile when a nav item is selected.
+    document.getElementById('insight-nav').addEventListener('click', () => {
+      if (isMobile()) {
+        document.body.classList.remove('sidebar-mobile-show');
+      }
     });
   </script>
 
