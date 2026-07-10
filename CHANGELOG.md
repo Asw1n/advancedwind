@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
+## [2.8.0] - 2026-07-10
+
+### Added
+- Wind-shift output paths (`trend.fast`, `trend.slow`, `trend.shift`) are now throttled to a maximum of 1 Hz on the SK bus, even when incoming wind data arrives at a higher rate.
+- `null` is written to all active output paths when the plugin stops, preventing stale values on the SK bus.
+- `null` is written to the relevant output paths when `detectWindShift`, `backCalculateApparentWind`, or `calculateGroundWind` are toggled off.
+
 ## [2.7.1] - 2026-06-17
 
 ### Added
