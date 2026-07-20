@@ -1,6 +1,6 @@
 {
   "name": "advancedwind",
-  "version": "2.8.0",
+  "version": "2.8.1",
   "description": "Calculates true wind, ground wind and wind shifts while correcting for sensor misalignment, rotating mast,vessel motion, upwash, leeway and mast height.",
   "main": "index.js",
   "exports": {
@@ -54,6 +54,6 @@
     ]
   },
   "dependencies": {
-    "signalkutilities": "^2.1.0"
+    "signalkutilities": "^3.0.0"
   }
 }
