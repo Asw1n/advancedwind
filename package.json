@@ -7,6 +7,7 @@
     ".": "./index.js"
   },
   "files": [
+    "icon.png",
     "index.js",
     "public/icon.png",
     "public/index.html",
@@ -43,7 +44,7 @@
   ],
   "signalk-plugin-enabled-by-default": false,
   "signalk": {
-    "appIcon": "./public/icon.png",
+    "appIcon": "./icon.png",
     "displayName": "Advanced Wind",
     "screenshots": [
       "./docs/overview.png",
