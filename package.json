@@ -55,6 +55,6 @@
     ]
   },
   "dependencies": {
-    "signalkutilities": "^3.0.0"
+    "signalkutilities": "^3.0.1"
   }
 }
