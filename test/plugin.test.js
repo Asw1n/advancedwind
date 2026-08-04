@@ -405,7 +405,6 @@ describe('memory leak / feedback loop detection (Issue #22)', () => {
     // One seed apparent-wind delta should fire calculate() once → one handleMessage.
     const { app, cleanup, subscribers, messageCount } = createTrackingShim({
       backCalculateApparentWind: true,
-      stalenessDetection: false,
     });
 
     try {
@@ -441,7 +440,6 @@ describe('memory leak / feedback loop detection (Issue #22)', () => {
     // To verify the fix is working, change the final assertion from `> 2` to `<= 2`.
     const { app, cleanup, subscribers, messageCount, heapSamples } = createFeedbackShim({
       backCalculateApparentWind: true,
-      stalenessDetection: false,
     });
 
     try {
@@ -483,7 +481,6 @@ describe('memory leak / feedback loop detection (Issue #22)', () => {
     // Confirms there is no baseline memory leak at the stated NMEA data rate.
     const { app, cleanup, subscribers } = createTrackingShim({
       backCalculateApparentWind: true,
-      stalenessDetection: false,
     });
 
     try {

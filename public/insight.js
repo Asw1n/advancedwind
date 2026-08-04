@@ -361,7 +361,6 @@ const paramMeta = {
   attitudeSmootherTimeSpan:    { label: "Attitude window size",                                          unit: "s", type: "number" },
   attitudeSmootherSteadyState: { label: "Attitude Kalman gain",                                         unit: "",  type: "number" },
   rotationPath:                { label: "Mast rotation path",                                            unit: "",  type: "string" },
-  stalenessDetection:          { label: "Staleness detection",                                           unit: "",  type: "boolean" },
   calculateGroundWind:         { label: "Calculate Wind direction",                                      unit: "",  type: "boolean" },
   backCalculateApparentWind:   { label: "Back-calculate apparent wind",                                  unit: "",  type: "boolean" },
   detectWindShift:             { label: "Detect wind shifts",                                            unit: "",  type: "boolean" },
@@ -437,7 +436,6 @@ const stepConfigs = {
       { key: "smootherTimeSpan",            showIf: cfg => (cfg.smootherClass || "ExponentialSmoother") === "MovingAverageSmoother" },
       { key: "smootherSteadyState",         showIf: cfg => (cfg.smootherClass || "ExponentialSmoother") === "KalmanSmoother" },
       // PassThroughSmoother has no parameters — nothing extra to show.
-      "stalenessDetection",
     ],
     inputs: (cfg) => [
       { type: "polar",    id: "apparentWind.smoothed", svgRole: "apparentWind" },

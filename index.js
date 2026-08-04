@@ -29,9 +29,6 @@ module.exports = function (app) {
     'upwashSlope': 0.05,
     'upwashOffset': 1.5,
 
-    // Staleness detection
-    'stalenessDetection': true,
-
     // Smoother
     'smootherClass': 'ExponentialSmoother',
     'smootherTau': 0.45,
@@ -426,6 +423,41 @@ module.exports = function (app) {
       pluginId: plugin.id,
       SmootherClass: resolveSmootherClass(options.attitudeSmootherClass),
       smootherOptions: buildAttitudeSmootherOptions(options),
+      onDelta: () => {
+        // Apply attitude smoother settings eagerly — don't wait for calculate() (wind data).
+        // Also resets derivative state to avoid a spike from the smoother discontinuity.
+        if (ATTITUDE_SMOOTHER_KEYS.some(k => k in changedOptions)) {
+          for (const k of ATTITUDE_SMOOTHER_KEYS) {
+            if (k in changedOptions) { options[k] = changedOptions[k]; delete changedOptions[k]; }
+          }
+          attitude.setSmootherOptions(buildAttitudeSmootherOptions(options));
+          attitude.setSmootherClass(resolveSmootherClass(options.attitudeSmootherClass));
+          saveOptions();
+          attLastTime = null;
+          attPrevious = null;
+          return;  // skip derivative computation this cycle
+        }
+        if (!isReadyAndFresh(attitude)) return;
+        const current = attitude.value;
+        const now = Date.now();
+        if (!attLastTime) {
+          attLastTime = now;
+          if (!attPrevious) attPrevious = { roll: current.roll, pitch: current.pitch };
+          else { attPrevious.roll = current.roll; attPrevious.pitch = current.pitch; }
+          return;
+        }
+        const deltaT = (now - attLastTime) / 1000;
+        // Skip samples that arrive too close together — wait for the window to grow.
+        if (deltaT < MIN_ATT_INTERVAL / 1000) return;
+        attLastTime = now;
+        const r = options.heightAboveWater;
+        sensorSpeed.setVectorValue({
+          x: ((current.pitch - attPrevious.pitch) / deltaT) * r,
+          y: ((current.roll - attPrevious.roll) / deltaT) * r
+        });
+        attPrevious.roll = current.roll;
+        attPrevious.pitch = current.pitch;
+      },
     });
     sensorSpeed = new Polar(app, plugin.id, "sensorSpeed");
     sensorSpeed.setMeta({ displayName: "Speed of sensor", plane: "Boat" });
@@ -451,42 +483,6 @@ module.exports = function (app) {
     // Keys that trigger an attitude smoother reset.
     const ATTITUDE_SMOOTHER_KEYS = ['attitudeSmootherClass', 'attitudeSmootherTau', 'attitudeSmootherTimeSpan', 'attitudeSmootherSteadyState'];
     const isReadyAndFresh = (input) => !!input && input.ready === true && !input.stale;
-    attitude.onChange = () => {
-      // Apply attitude smoother settings eagerly — don't wait for calculate() (wind data).
-      // Also resets derivative state to avoid a spike from the smoother discontinuity.
-      if (ATTITUDE_SMOOTHER_KEYS.some(k => k in changedOptions)) {
-        for (const k of ATTITUDE_SMOOTHER_KEYS) {
-          if (k in changedOptions) { options[k] = changedOptions[k]; delete changedOptions[k]; }
-        }
-        attitude.setSmootherOptions(buildAttitudeSmootherOptions(options));
-        attitude.setSmootherClass(resolveSmootherClass(options.attitudeSmootherClass));
-        saveOptions();
-        attLastTime = null;
-        attPrevious = null;
-        return;  // skip derivative computation this cycle
-      }
-      if (!isReadyAndFresh(attitude)) return;
-      const current = attitude.value;
-      const now = Date.now();
-      if (!attLastTime) {
-        attLastTime = now;
-        if (!attPrevious) attPrevious = { roll: current.roll, pitch: current.pitch };
-        else { attPrevious.roll = current.roll; attPrevious.pitch = current.pitch; }
-        return;
-      }
-      const deltaT = (now - attLastTime) / 1000;
-      // Skip samples that arrive too close together — wait for the window to grow.
-      if (deltaT < MIN_ATT_INTERVAL / 1000) return;
-      attLastTime = now;
-      const r = options.heightAboveWater;
-      sensorSpeed.setVectorValue({
-        x: ((current.pitch - attPrevious.pitch) / deltaT) * r,
-        y: ((current.roll - attPrevious.roll) / deltaT) * r
-      });
-      attPrevious.roll = current.roll;
-      attPrevious.pitch = current.pitch;
-    };
-
     // Snapshot polars for per-step before/after inspection
     misalignIn = new Polar(app, plugin.id, "misalignIn"); misalignIn.setMeta({ displayName: "Before misalignment", plane: "Boat" });
     misalignOut = new Polar(app, plugin.id, "misalignOut"); misalignOut.setMeta({ displayName: "After misalignment", plane: "Boat" });
@@ -545,6 +541,7 @@ module.exports = function (app) {
       SmootherClass,
       smootherOptions,
       meta: { displayName: "Apparent Wind", plane: "Boat" },
+      onDelta: () => { calculate(); },
     });
 
 
@@ -618,6 +615,28 @@ module.exports = function (app) {
       meta: { displayName: 'Fast mean wind direction', plane: 'Ground', units: 'rad', displayUnits: { category: 'angle' } },
       SmootherClass: resolveSmootherClass(options.windShiftFastClass),
       smootherOptions: buildWindShiftFastOptions(options),
+      onDelta: () => {
+        if (!options.detectWindShift) return;
+        const fast = windShiftFast.value;
+        const slow = windShiftSlow.value;
+        if (typeof fast !== 'number' || typeof slow !== 'number') return;
+        const raw = fast - slow;
+        windShift.value = ((raw + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+        const now = Date.now();
+        if (now - windShiftLastSend >= 1000) {
+          windShiftLastSend = now;
+          app.handleMessage(plugin.id, {
+            context: 'vessels.self',
+            updates: [{
+              $source: plugin.id, values: [
+                { path: 'environment.wind.directionTrue.trend.fast', value: fast },
+                { path: 'environment.wind.directionTrue.trend.slow', value: slow },
+                { path: 'environment.wind.directionTrue.trend.shift', value: windShift.value },
+              ]
+            }]
+          });
+        }
+      },
     }
     );
     windShiftFast.id = 'windShiftFast';
@@ -638,30 +657,6 @@ module.exports = function (app) {
     MessageHandler.setMeta(app, plugin.in, 'environment.wind.directionTrue.trend.shift', { displayName: 'Wind Shift', description: 'Wind shift: angle difference between fast and slow mean wind directions', plane: 'Ground', units: 'rad', displayUnits: { category: 'angle' } });
 
     if (options.detectWindShift) sendWindShiftMeta();
-
-    // Recalculate windShift whenever windShiftFast gets a new sample.
-    windShiftFast.onChange = () => {
-      if (!options.detectWindShift) return;
-      const fast = windShiftFast.value;
-      const slow = windShiftSlow.value;
-      if (typeof fast !== 'number' || typeof slow !== 'number') return;
-      const raw = fast - slow;
-      windShift.value = ((raw + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
-      const now = Date.now();
-      if (now - windShiftLastSend >= 1000) {
-        windShiftLastSend = now;
-        app.handleMessage(plugin.id, {
-          context: 'vessels.self',
-          updates: [{
-            $source: plugin.id, values: [
-              { path: 'environment.wind.directionTrue.trend.fast', value: fast },
-              { path: 'environment.wind.directionTrue.trend.slow', value: slow },
-              { path: 'environment.wind.directionTrue.trend.shift', value: windShift.value },
-            ]
-          }]
-        });
-      }
-    };
 
     //# endregion initialization of paths
 
@@ -694,23 +689,6 @@ module.exports = function (app) {
     reportFull.addDelta(windShiftSlow);
     reportFull.addDelta(windShift);
     //#endregion defining report
-
-    apparentWind.onChange = () => {
-      calculate();
-    };
-
-    // Apply staleness detection setting to all subscribing instances.
-    // A single assignment on each outermost smoother propagates to its wrapped handler(s).
-    // windShiftFast/windShiftSlow are SmoothedAngle instances that internally use a fixed
-    // magnitude handler (value=1, never subscribed) with stalenessDetection=false by design.
-    // Propagating stalenessDetection to them would overwrite that and make the magnitude
-    // handler stale immediately (timestamp=null), breaking polar.ready and silencing onChange.
-    function applyStalenessDetection(val) {
-      for (const inst of [heading, mast, attitude, apparentWind, boatSpeedHandler, leewayHandler, groundSpeed]) {
-        if (inst) inst.stalenessDetection = val;
-      }
-    }
-    applyStalenessDetection(options.stalenessDetection ?? true);
 
     isRunning = true;
     app.debug("Start wind calculations");
@@ -857,7 +835,9 @@ module.exports = function (app) {
         options[key] = value;
         switch (key) {
           case 'rotationPath':
+            mast.unsubscribe();
             mast.handler.path = value;
+            mast.subscribe();
             break;
           case 'smootherClass':
           case 'smootherTau':
@@ -871,9 +851,6 @@ module.exports = function (app) {
           case 'attitudeSmootherTimeSpan':
           case 'attitudeSmootherSteadyState':
             needsSmootherReset = true;
-            break;
-          case 'stalenessDetection':
-            applyStalenessDetection(value);
             break;
           case 'detectWindShift':
             if (value) {
@@ -954,6 +931,10 @@ module.exports = function (app) {
         if (options.calculateGroundWind && groundWind) Polar.clear(app, plugin.id, [groundWind]);
         if (options.detectWindShift && windShiftFast) MessageHandler.clear(app, plugin.id, [windShiftFast, windShiftSlow, windShift]);
         reportFull = null;
+        apparentWind = apparentWind?.terminate(app);
+        trueWind = trueWind?.terminate(app);
+        calculatedWind = calculatedWind?.terminate(app);
+        groundWind = groundWind?.terminate(app);
         heading = heading?.terminate(app);
         mast = mast?.terminate(app);
         attitude = attitude?.terminate(app);
