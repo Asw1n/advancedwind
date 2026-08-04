@@ -208,6 +208,7 @@ let state = {
   attitudesById: {},
   tablesById: {}
 };
+let lifecycleWarnings = [];
 let config = null;
 let _prevWarningsText = null;
 
@@ -257,6 +258,7 @@ async function fetchReport() {
 
     setMessage("");
     const data = await response.json();
+    lifecycleWarnings = Array.isArray(data.lifecycleWarnings) ? data.lifecycleWarnings : [];
     return data;
   } catch (err) {
     console.error(err);
@@ -985,18 +987,13 @@ function renderPanelLive(step) {
 
   // 7. Warnings — check all configured inputs for readiness across all steps.
   warningsEl.innerHTML = "";
-  const notReadyReasons = [];
-  (cfgInputs || []).forEach(item => {
-    const data = getStateItem(item);
-    if (isNotReady(data)) {
-      const label = meta[item.id]?.displayName ?? item.id;
-      notReadyReasons.push(`"${label}" — ${getNotReadyReason(data)}`);
-    }
-  });
-  // For correction steps also validate required parameters.
-  if (cfg && cfg.correctionFlag) {
-    notReadyReasons.push(...getCannotActivateReasons(cfg));
+  if (step.id !== "inputs") {
+    return;
   }
+  const notReadyReasons = [];
+  lifecycleWarnings.forEach(w => {
+    if (w && typeof w.message === "string") notReadyReasons.push(w.message);
+  });
   if (notReadyReasons.length > 0) {
     warningsEl.appendChild(sceneSectionHeading("Warnings"));
     const list = document.createElement("ul");
@@ -1039,18 +1036,19 @@ function renderPanelLiveFast(step) {
   _updateDataTable(inputsEl.querySelector('table'),  cfgInputs  || []);
   _updateDataTable(outputsEl.querySelector('table'), cfgOutputs || []);
 
+  if (step.id !== "inputs") {
+    if (_prevWarningsText !== "") {
+      _prevWarningsText = "";
+      warningsEl.innerHTML = "";
+    }
+    return;
+  }
+
   // Warnings: only touch the DOM when the content has actually changed.
   const notReadyReasons = [];
-  (cfgInputs || []).forEach(item => {
-    const data = getStateItem(item);
-    if (isNotReady(data)) {
-      const label = meta[item.id]?.displayName ?? item.id;
-      notReadyReasons.push(`"${label}" — ${getNotReadyReason(data)}`);
-    }
+  lifecycleWarnings.forEach(w => {
+    if (w && typeof w.message === "string") notReadyReasons.push(w.message);
   });
-  if (cfg && cfg.correctionFlag) {
-    notReadyReasons.push(...getCannotActivateReasons(cfg));
-  }
   const warningsText = notReadyReasons.join('\n');
   if (warningsText === _prevWarningsText) return;
   _prevWarningsText = warningsText;
