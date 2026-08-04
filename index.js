@@ -427,6 +427,14 @@ module.exports = function (app) {
     }
   }
 
+  function clearWindShiftOutputs() {
+    MessageHandler.clear(app, plugin.id, [
+      { path: 'environment.wind.directionTrue.trend.fast' },
+      { path: 'environment.wind.directionTrue.trend.slow' },
+      { path: 'environment.wind.directionTrue.trend.shift' },
+    ]);
+  }
+
   plugin.start = () => {
     app.debug("plugin started");
     app.setPluginStatus("Starting");
@@ -1024,7 +1032,7 @@ module.exports = function (app) {
             if (value) {
               sendWindShiftMeta();
             } else {
-              MessageHandler.clear(app, plugin.id, [windShiftFast, windShiftSlow, windShift]);
+              clearWindShiftOutputs();
             }
             break;
           case 'backCalculateApparentWind':
@@ -1118,7 +1126,11 @@ module.exports = function (app) {
         if (trueWind) Polar.clear(app, plugin.id, [trueWind]);
         if (options.backCalculateApparentWind && calculatedWind) Polar.clear(app, plugin.id, [calculatedWind]);
         if (options.calculateGroundWind && groundWind) Polar.clear(app, plugin.id, [groundWind]);
-        if (options.detectWindShift && windShiftFast) MessageHandler.clear(app, plugin.id, [windShiftFast, windShiftSlow, windShift]);
+        try {
+          clearWindShiftOutputs();
+        } catch (e) {
+          app.debug(`[${plugin.id}] failed to clear wind shift outputs during stop: ${e.message}`);
+        }
         reportFull = null;
         apparentWind = apparentWind?.terminate(app);
         trueWind = trueWind?.terminate(app);

@@ -521,12 +521,19 @@ describe('memory leak / feedback loop detection (Issue #22)', () => {
 });
 
 describe('plugin lifecycle', () => {
-  it('start() completes without throwing', () => {
+  it('start() completes without throwing', async () => {
     const { app, cleanup } = createAppShim();
+    let plugin;
     try {
-      const plugin = require('../index.js')(app);
+      plugin = require('../index.js')(app);
       assert.doesNotThrow(() => plugin.start(), 'plugin.start() must not throw');
     } finally {
+      if (plugin) {
+        await assert.doesNotReject(
+          () => plugin.stop(),
+          'plugin.stop() must resolve without rejection'
+        );
+      }
       cleanup();
     }
   });
