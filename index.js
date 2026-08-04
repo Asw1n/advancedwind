@@ -220,11 +220,66 @@ module.exports = function (app) {
   let windShiftSlow = null;  // SmoothedAngle on environment.wind.directionTrue (slow EMA / reference)
   let windShift = null;  // inline delta: angle diff (rad) between fast and slow means
   let windShiftLastSend = 0;  // timestamp (ms) of last wind-shift SK bus write — used to throttle to 1 Hz
+  let lifecycleWarnings = [];
+  let lifecycleWarningMap = new Map();
   // Hoisted so the PUT /settings handler can drain changedOptions immediately.
   // Without this, a stale source filter deadlocks the cycle: calculate() only
   // runs after the smoother samples, and the smoother won't sample while the
   // filter is rejecting every incoming delta.
   let applyOptionChanges = null;
+
+  function setLifecycleWarning(id, status, path) {
+    const safePath = path || 'unknown path';
+    const message = status === 'idle'
+      ? `Input ${id} is idle on ${safePath}; resubscribing`
+      : `Input ${id} is stale on ${safePath}`;
+    lifecycleWarningMap.set(id, {
+      id,
+      status,
+      path: safePath,
+      message,
+      updatedAt: Date.now()
+    });
+    lifecycleWarnings = Array.from(lifecycleWarningMap.values())
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  function clearLifecycleWarning(id) {
+    if (!lifecycleWarningMap.has(id)) return;
+    lifecycleWarningMap.delete(id);
+    lifecycleWarnings = Array.from(lifecycleWarningMap.values())
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  function buildLifecycleCallbacks(id, getPath, resubscribe) {
+    return {
+      onDelta: () => {
+        clearLifecycleWarning(id);
+      },
+      onStale: () => {
+        if (!isRunning) return;
+        const path = getPath();
+        if (!path || String(path).trim() === '') return;
+        app.debug(`[${plugin.id}] stale input ${id} on ${path}`);
+        setLifecycleWarning(id, 'stale', path);
+      },
+      onIdle: () => {
+        if (!isRunning) return;
+        const path = getPath();
+        if (!path || String(path).trim() === '') {
+          clearLifecycleWarning(id);
+          return;
+        }
+        app.debug(`[${plugin.id}] idle input ${id} on ${path}; resubscribing`);
+        setLifecycleWarning(id, 'idle', path);
+        try {
+          resubscribe();
+        } catch (e) {
+          app.debug(`[${plugin.id}] resubscribe failed for ${id}: ${e.message}`);
+        }
+      }
+    };
+  }
 
 
   plugin.registerWithRouter = function (router) {
@@ -269,7 +324,9 @@ module.exports = function (app) {
         res.status(503).json({ error: "Plugin is not running" });
       } else {
         try {
-          res.json(reportFull.report());
+          const payload = reportFull.report();
+          payload.lifecycleWarnings = lifecycleWarnings;
+          res.json(payload);
         } catch (err) {
           app.error(`AdvancedWind /report error: ${err.message}`);
           res.status(500).json({ error: "Failed to build report" });
@@ -373,6 +430,8 @@ module.exports = function (app) {
   plugin.start = () => {
     app.debug("plugin started");
     app.setPluginStatus("Starting");
+    lifecycleWarningMap = new Map();
+    lifecycleWarnings = [];
 
     // Store options at module scope so runtime changes via /config
     // can be picked up by the calculation logic. Guard against
@@ -391,8 +450,14 @@ module.exports = function (app) {
     }
     let SmootherClass = resolveSmootherClass(options.smootherClass);
     let smootherOptions = buildSmootherOptions(options);
+    const hasMastPath = !!(options.rotationPath && String(options.rotationPath).trim());
 
     // heading
+    const headingLifecycle = buildLifecycleCallbacks(
+      'heading.smoothed',
+      () => heading?.handler?.path || 'navigation.headingTrue',
+      () => { heading?.unsubscribe(); heading?.subscribe(); }
+    );
     heading = createSmoothedHandler({
       id: "heading",
       path: "navigation.headingTrue",
@@ -401,29 +466,56 @@ module.exports = function (app) {
       pluginId: plugin.id,
       SmootherClass,
       smootherOptions,
+      onDelta: headingLifecycle.onDelta,
+      onIdle: headingLifecycle.onIdle,
+      onStale: headingLifecycle.onStale,
     });
 
     //mast rotation (always create handler; options decide whether it is used)
+    const mastLifecycle = buildLifecycleCallbacks(
+      'mast.smoothed',
+      () => mast?.handler?.path || options.rotationPath,
+      () => { mast?.unsubscribe(); mast?.subscribe(); }
+    );
     mast = createSmoothedHandler({
       id: "mast",
       path: options.rotationPath,
-      subscribe: true,
+      subscribe: hasMastPath,
       app,
       pluginId: plugin.id,
       SmootherClass,
       smootherOptions,
+      onDelta: mastLifecycle.onDelta,
+      onIdle: mastLifecycle.onIdle,
+      onStale: mastLifecycle.onStale,
     });
 
-    //attitude (always create handler; corrections decide whether it is used)
+    const shouldSubscribeAttitude = () => !!(options.correctForMastHeel || options.correctForMastMovement);
+    const shouldSubscribeLeeway = () => !!options.correctForLeeway;
+
+    //attitude (subscribe only when mast heel or mast movement correction is enabled)
+    const attitudeLifecycle = buildLifecycleCallbacks(
+      'attitude.smoothed',
+      () => attitude?.handler?.path || 'navigation.attitude',
+      () => {
+        if (!shouldSubscribeAttitude()) {
+          clearLifecycleWarning('attitude.smoothed');
+          return;
+        }
+        attitude?.unsubscribe();
+        attitude?.subscribe();
+      }
+    );
     attitude = createSmoothedHandler({
       id: "attitude",
       path: "navigation.attitude",
-      subscribe: true,
+      subscribe: shouldSubscribeAttitude(),
       app,
       pluginId: plugin.id,
       SmootherClass: resolveSmootherClass(options.attitudeSmootherClass),
       smootherOptions: buildAttitudeSmootherOptions(options),
       onDelta: () => {
+        attitudeLifecycle.onDelta();
         // Apply attitude smoother settings eagerly — don't wait for calculate() (wind data).
         // Also resets derivative state to avoid a spike from the smoother discontinuity.
         if (ATTITUDE_SMOOTHER_KEYS.some(k => k in changedOptions)) {
@@ -458,6 +550,8 @@ module.exports = function (app) {
         attPrevious.roll = current.roll;
         attPrevious.pitch = current.pitch;
       },
+      onIdle: attitudeLifecycle.onIdle,
+      onStale: attitudeLifecycle.onStale,
     });
     sensorSpeed = new Polar(app, plugin.id, "sensorSpeed");
     sensorSpeed.setMeta({ displayName: "Speed of sensor", plane: "Boat" });
@@ -531,6 +625,11 @@ module.exports = function (app) {
     };
 
     //apparent wind
+    const apparentWindLifecycle = buildLifecycleCallbacks(
+      'apparentWind.smoothed',
+      () => `${apparentWind?.polar?.pathMagnitude || 'environment.wind.speedApparent'}, ${apparentWind?.polar?.pathAngle || 'environment.wind.angleApparent'}`,
+      () => { apparentWind?.unsubscribe(); apparentWind?.subscribe(true, true); }
+    );
     apparentWind = createSmoothedPolar({
       id: "apparentWind",
       pathMagnitude: "environment.wind.speedApparent",
@@ -541,7 +640,9 @@ module.exports = function (app) {
       SmootherClass,
       smootherOptions,
       meta: { displayName: "Apparent Wind", plane: "Boat" },
-      onDelta: () => { calculate(); },
+      onDelta: () => { apparentWindLifecycle.onDelta(); calculate(); },
+      onIdle: apparentWindLifecycle.onIdle,
+      onStale: apparentWindLifecycle.onStale,
     });
 
 
@@ -556,16 +657,33 @@ module.exports = function (app) {
       pluginId: plugin.id,
       SmootherClass,
       smootherOptions,
+      ...buildLifecycleCallbacks(
+        'boatSpeed.smoothed',
+        () => boatSpeedHandler?.handler?.path || 'navigation.speedThroughWater',
+        () => { boatSpeedHandler?.unsubscribe(); boatSpeedHandler?.subscribe(); }
+      ),
     });
 
     leewayHandler = createSmoothedHandler({
       id: "leeway",
       path: "navigation.leewayAngle",
-      subscribe: true,
+      subscribe: shouldSubscribeLeeway(),
       app,
       pluginId: plugin.id,
       SmootherClass,
       smootherOptions,
+      ...buildLifecycleCallbacks(
+        'leeway.smoothed',
+        () => leewayHandler?.handler?.path || 'navigation.leewayAngle',
+        () => {
+          if (!shouldSubscribeLeeway()) {
+            clearLifecycleWarning('leeway.smoothed');
+            return;
+          }
+          leewayHandler?.unsubscribe();
+          leewayHandler?.subscribe();
+        }
+      ),
     });
 
     // Forward-only polar: angle is always 0. Updated each cycle from boatSpeedHandler.
@@ -589,7 +707,12 @@ module.exports = function (app) {
       SmootherClass,
       smootherOptions,
       meta: { displayName: "Ground Speed", plane: "Ground" },
-      angleRange: '0to2pi'
+      angleRange: '0to2pi',
+      ...buildLifecycleCallbacks(
+        'groundSpeed.smoothed',
+        () => `${groundSpeed?.polar?.pathMagnitude || 'navigation.speedOverGround'}, ${groundSpeed?.polar?.pathAngle || 'navigation.courseOverGroundTrue'}`,
+        () => { groundSpeed?.unsubscribe(); groundSpeed?.subscribe(true, true); }
+      )
     });
 
     // calculated wind
@@ -616,6 +739,7 @@ module.exports = function (app) {
       SmootherClass: resolveSmootherClass(options.windShiftFastClass),
       smootherOptions: buildWindShiftFastOptions(options),
       onDelta: () => {
+        clearLifecycleWarning('windShiftFast');
         if (!options.detectWindShift) return;
         const fast = windShiftFast.value;
         const slow = windShiftSlow.value;
@@ -637,6 +761,20 @@ module.exports = function (app) {
           });
         }
       },
+      onIdle: () => {
+        if (!isRunning) return;
+        const path = windShiftFast?.handler?.path || 'environment.wind.directionTrue';
+        app.debug(`[${plugin.id}] idle input windShiftFast on ${path}; resubscribing`);
+        setLifecycleWarning('windShiftFast', 'idle', path);
+        windShiftFast?.unsubscribe();
+        windShiftFast?.subscribe(false, true);
+      },
+      onStale: () => {
+        if (!isRunning) return;
+        const path = windShiftFast?.handler?.path || 'environment.wind.directionTrue';
+        app.debug(`[${plugin.id}] stale input windShiftFast on ${path}`);
+        setLifecycleWarning('windShiftFast', 'stale', path);
+      },
     }
     );
     windShiftFast.id = 'windShiftFast';
@@ -648,6 +786,23 @@ module.exports = function (app) {
       meta: { displayName: 'Slow mean wind direction (reference)', plane: 'Ground', units: 'rad', displayUnits: { category: 'angle' } },
       SmootherClass: resolveSmootherClass(options.windShiftSlowClass),
       smootherOptions: buildWindShiftSlowOptions(options),
+      onDelta: () => {
+        clearLifecycleWarning('windShiftSlow');
+      },
+      onIdle: () => {
+        if (!isRunning) return;
+        const path = windShiftSlow?.handler?.path || 'environment.wind.directionTrue';
+        app.debug(`[${plugin.id}] idle input windShiftSlow on ${path}; resubscribing`);
+        setLifecycleWarning('windShiftSlow', 'idle', path);
+        windShiftSlow?.unsubscribe();
+        windShiftSlow?.subscribe(false, true);
+      },
+      onStale: () => {
+        if (!isRunning) return;
+        const path = windShiftSlow?.handler?.path || 'environment.wind.directionTrue';
+        app.debug(`[${plugin.id}] stale input windShiftSlow on ${path}`);
+        setLifecycleWarning('windShiftSlow', 'stale', path);
+      },
     }
     );
     windShiftSlow.id = 'windShiftSlow';
@@ -829,6 +984,8 @@ module.exports = function (app) {
     applyOptionChanges = function () {
       let needsSmootherReset = false;
       let needsWindShiftReset = false;
+      let needsAttitudeSubscriptionSync = false;
+      let needsLeewaySubscriptionSync = false;
       // Pop each key-value pair from changedOptions
       for (const key of Object.keys(changedOptions)) {
         const value = changedOptions[key];
@@ -837,7 +994,11 @@ module.exports = function (app) {
           case 'rotationPath':
             mast.unsubscribe();
             mast.handler.path = value;
-            mast.subscribe();
+            if (value && String(value).trim()) {
+              mast.subscribe();
+            } else {
+              clearLifecycleWarning('mast.smoothed');
+            }
             break;
           case 'smootherClass':
           case 'smootherTau':
@@ -851,6 +1012,13 @@ module.exports = function (app) {
           case 'attitudeSmootherTimeSpan':
           case 'attitudeSmootherSteadyState':
             needsSmootherReset = true;
+            break;
+          case 'correctForMastHeel':
+          case 'correctForMastMovement':
+            needsAttitudeSubscriptionSync = true;
+            break;
+          case 'correctForLeeway':
+            needsLeewaySubscriptionSync = true;
             break;
           case 'detectWindShift':
             if (value) {
@@ -911,6 +1079,27 @@ module.exports = function (app) {
         }
       }
 
+      if (needsAttitudeSubscriptionSync && attitude) {
+        if (shouldSubscribeAttitude()) {
+          attitude.subscribe();
+        } else {
+          attitude.unsubscribe();
+          clearLifecycleWarning('attitude.smoothed');
+          attLastTime = null;
+          attPrevious = null;
+          sensorSpeed?.invalidate?.();
+        }
+      }
+
+      if (needsLeewaySubscriptionSync && leewayHandler) {
+        if (shouldSubscribeLeeway()) {
+          leewayHandler.subscribe();
+        } else {
+          leewayHandler.unsubscribe();
+          clearLifecycleWarning('leeway.smoothed');
+        }
+      }
+
       hasChangedOptions = false;
       saveOptions();
     };
@@ -957,6 +1146,8 @@ module.exports = function (app) {
         windShiftFast = windShiftFast?.terminate();
         windShiftSlow = windShiftSlow?.terminate();
         windShift = windShift?.terminate();
+        lifecycleWarningMap = new Map();
+        lifecycleWarnings = [];
         applyOptionChanges = null;
         app.debug("plugin stopped");
         app.setPluginStatus("Stopped");

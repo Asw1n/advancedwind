@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
+## [Unreleased]
+
+### Fixed
+- Input subscriptions now recover automatically after idle or stale periods: the webapp surfaces lifecycle warnings and the plugin attempts to resubscribe instead of silently leaving the step unusable.
+- Output paths are now cleared with `null` when relevant corrections are toggled off or when the plugin stops, preventing stale values from lingering on the Signal K bus.
+
 ## [2.8.2] - 2026-07-23
 
 ### Fixed
