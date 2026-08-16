@@ -52,6 +52,9 @@
       "./docs/heel.png",
       "./docs/upwash.png",
       "./docs/windshift.png"
+    ],
+    "recommends": [
+      "speedandcurrent"
     ]
   },
   "dependencies": {
