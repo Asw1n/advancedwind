@@ -6,7 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.9.3] - 2026-09-04
+
 ### Fixed
+- Updated `signalkutilities` to 3.1.1, so an input that goes silent *after* having delivered data is now detected and resubscribed. Previously recovery only ran for subscriptions that had never received a delta, meaning an upstream outage after a healthy start could leave the plugin dead until it was restarted.
 - Input subscriptions now recover automatically after idle or stale periods: the webapp surfaces lifecycle warnings and the plugin attempts to resubscribe instead of silently leaving the step unusable.
 - Output paths are now cleared with `null` when relevant corrections are toggled off or when the plugin stops, preventing stale values from lingering on the Signal K bus.
 
