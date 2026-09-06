@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- Updated `signalkutilities` to 3.1.2, which completes the 3.1.1 recovery fix for polar-backed inputs. Apparent wind, ground speed and both wind-shift smoothers are built on `Polar`/`PolarSmoother`, where the idle timer was still cleared rather than re-armed on each delta, so those inputs did not recover after going silent following a healthy start.
+
 ## [2.9.3] - 2026-09-04
 
 ### Fixed
