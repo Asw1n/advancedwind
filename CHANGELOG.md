@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- Attitude derivative sampling now ignores incomplete roll/pitch updates and resets cleanly after smoother changes, preventing spurious sensor-speed spikes during mast heel and mast movement corrections.
+
 ## [2.9.4] - 2026-09-06
 
 ### Fixed

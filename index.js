@@ -232,6 +232,8 @@ module.exports = function (app) {
     const safePath = path || 'unknown path';
     const message = status === 'idle'
       ? `Input ${id} is idle on ${safePath}; resubscribing`
+      : status === 'incomplete'
+      ? `Input ${id} is missing ${safePath}`
       : `Input ${id} is stale on ${safePath}`;
     lifecycleWarningMap.set(id, {
       id,
@@ -539,6 +541,8 @@ module.exports = function (app) {
         }
         if (!isReadyAndFresh(attitude)) return;
         const current = attitude.value;
+        // Missing roll/pitch this delta — skip rather than let a fabricated value spike the derivative.
+        if (!Number.isFinite(current.roll) || !Number.isFinite(current.pitch)) return;
         const now = Date.now();
         if (!attLastTime) {
           attLastTime = now;
@@ -632,28 +636,6 @@ module.exports = function (app) {
       }
     };
 
-    //apparent wind
-    const apparentWindLifecycle = buildLifecycleCallbacks(
-      'apparentWind.smoothed',
-      () => `${apparentWind?.polar?.pathMagnitude || 'environment.wind.speedApparent'}, ${apparentWind?.polar?.pathAngle || 'environment.wind.angleApparent'}`,
-      () => { apparentWind?.unsubscribe(); apparentWind?.subscribe(true, true); }
-    );
-    apparentWind = createSmoothedPolar({
-      id: "apparentWind",
-      pathMagnitude: "environment.wind.speedApparent",
-      pathAngle: "environment.wind.angleApparent",
-      subscribe: true,
-      app: app,
-      pluginId: plugin.id,
-      SmootherClass,
-      smootherOptions,
-      meta: { displayName: "Apparent Wind", plane: "Boat" },
-      onDelta: () => { apparentWindLifecycle.onDelta(); calculate(); },
-      onIdle: apparentWindLifecycle.onIdle,
-      onStale: apparentWindLifecycle.onStale,
-    });
-
-
     // Boat speed and leeway: two independent delta handlers.
     // boatSpeed polar is angle=0 (forward-only) so leeway is NOT implicitly included
     // in true wind subtraction — it is only applied explicitly in the leeway correction step.
@@ -736,6 +718,31 @@ module.exports = function (app) {
     trueWind.configureAngle("environment.wind.angleTrueWater");
     trueWind.setMeta({ displayName: "True Wind", plane: "Boat" });
     trueWind.angleRange = '-piToPi';
+
+    // apparent wind — constructed unsubscribed, then subscribed as a separate
+    // statement below, so `apparentWind` is assigned before subscribe() can
+    // synchronously invoke onDelta (e.g. via the signalKutilities boot-time
+    // bootstrap fallback) — calculate() reads `apparentWind` via this closure.
+    const apparentWindLifecycle = buildLifecycleCallbacks(
+      'apparentWind.smoothed',
+      () => `${apparentWind?.polar?.pathMagnitude || 'environment.wind.speedApparent'}, ${apparentWind?.polar?.pathAngle || 'environment.wind.angleApparent'}`,
+      () => { apparentWind?.unsubscribe(); apparentWind?.subscribe(true, true); }
+    );
+    apparentWind = createSmoothedPolar({
+      id: "apparentWind",
+      pathMagnitude: "environment.wind.speedApparent",
+      pathAngle: "environment.wind.angleApparent",
+      subscribe: false,
+      app: app,
+      pluginId: plugin.id,
+      SmootherClass,
+      smootherOptions,
+      meta: { displayName: "Apparent Wind", plane: "Boat" },
+      onDelta: () => { apparentWindLifecycle.onDelta(); calculate(); },
+      onIdle: apparentWindLifecycle.onIdle,
+      onStale: apparentWindLifecycle.onStale,
+    });
+    apparentWind.subscribe(true, true);
 
     // Wind shift detection: two SmoothedAngles subscribing to the plugin's own groundWind output.
     // subscribeOptions:{} disables excludeSelf so the plugin's own directionTrue output is received.
@@ -860,6 +867,9 @@ module.exports = function (app) {
 
 
     function calculate() {
+      // Guards against a partial delta (e.g. magnitude arriving without angle yet,
+      // as can happen with a synchronous subscribe-time bootstrap value).
+      if (!apparentWind.ready) return;
       // Re-read options at runtime so /config changes take effect
       if (hasChangedOptions) applyOptionChanges();
 
@@ -891,8 +901,15 @@ module.exports = function (app) {
       // --- Mast heel ---
       mastHeelIn.copyFrom(calculatedWind);
       if (options.correctForMastHeel && attitude.ready) {
-        calculatedWind.xValue = calculatedWind.x / Math.cos(attitude.value.pitch);
-        calculatedWind.yValue = calculatedWind.y / Math.cos(attitude.value.roll);
+        const pitchOk = Number.isFinite(attitude.value.pitch);
+        const rollOk = Number.isFinite(attitude.value.roll);
+        // Missing pitch/roll — leave that axis untouched rather than guessing.
+        if (pitchOk) calculatedWind.xValue = calculatedWind.x / Math.cos(attitude.value.pitch);
+        if (rollOk) calculatedWind.yValue = calculatedWind.y / Math.cos(attitude.value.roll);
+        if (pitchOk) clearLifecycleWarning('attitude.smoothed.pitch');
+        else setLifecycleWarning('attitude.smoothed.pitch', 'incomplete', 'navigation.attitude.pitch');
+        if (rollOk) clearLifecycleWarning('attitude.smoothed.roll');
+        else setLifecycleWarning('attitude.smoothed.roll', 'incomplete', 'navigation.attitude.roll');
       }
       mastHeelOut.copyFrom(calculatedWind);
 
@@ -983,7 +1000,10 @@ module.exports = function (app) {
     function approximateWindGradient() {
       let h = options.heightAboveWater;
       if (attitude.ready) {
-        const hEff = h * Math.cos(attitude.value.roll) * Math.cos(attitude.value.pitch);
+        // Missing roll/pitch — treat that factor as neutral (cos 0 = 1) rather than guessing.
+        const rollFactor = Number.isFinite(attitude.value.roll) ? Math.cos(attitude.value.roll) : 1;
+        const pitchFactor = Number.isFinite(attitude.value.pitch) ? Math.cos(attitude.value.pitch) : 1;
+        const hEff = h * rollFactor * pitchFactor;
         if (hEff > 0) h = hEff;
       }
       return Math.pow(10 / h, options.windExponent);

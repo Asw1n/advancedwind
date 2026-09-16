@@ -399,6 +399,43 @@ function deliverDelta(subscribers, values, source = 'nmea2000') {
   }
 }
 
+/**
+ * Creates an app shim + subscriber registry that also records every delta
+ * passed to handleMessage, for assertions on published values.
+ * Returns { app, cleanup, subscribers, sentDeltas }.
+ */
+function createCapturingShim(pluginOptions = {}) {
+  const { app: base, cleanup } = createAppShim();
+  const subscribers = new Map();
+  const sentDeltas = [];
+
+  const app = new Proxy(base, {
+    get(target, prop) {
+      if (prop === 'subscriptionmanager') {
+        return {
+          subscribe(msg, unsubscribes, _err, deltaCb) {
+            for (const s of (msg.subscribe || [])) {
+              if (!subscribers.has(s.path)) subscribers.set(s.path, new Set());
+              subscribers.get(s.path).add(deltaCb);
+            }
+            const unsub = () => {
+              for (const s of (msg.subscribe || [])) subscribers.get(s.path)?.delete(deltaCb);
+            };
+            if (Array.isArray(unsubscribes)) unsubscribes.push(unsub);
+          },
+        };
+      }
+      if (prop === 'handleMessage') return (_pluginId, delta) => { sentDeltas.push(delta); };
+      if (prop === 'readPluginOptions') return () => ({ configuration: pluginOptions });
+      if (prop in target) return target[prop];
+      if (typeof prop === 'symbol') return undefined;
+      return () => {};
+    },
+  });
+
+  return { app, cleanup, subscribers, sentDeltas };
+}
+
 describe('memory leak / feedback loop detection (Issue #22)', () => {
   it('handleMessage call count stays bounded without feedback (sanity check)', async () => {
     // No feedback shim — handleMessage is a no-op counter.
@@ -561,6 +598,98 @@ describe('plugin lifecycle', () => {
       assert.doesNotThrow(() => plugin.start(), 'second start() must not throw');
       await assert.doesNotReject(() => plugin.stop(), 'second stop() must resolve');
     } finally {
+      cleanup();
+    }
+  });
+});
+
+describe('attitude guard clauses (missing spec sub-property)', () => {
+  it('mast heel correction skips only the missing axis instead of producing NaN', async () => {
+    const { app, cleanup, subscribers, sentDeltas } = createCapturingShim({
+      correctForMastHeel: true,
+      backCalculateApparentWind: true,
+    });
+    let plugin;
+    try {
+      plugin = require('../index.js')(app);
+      plugin.start();
+
+      // Attitude delta missing pitch — only roll is present.
+      deliverDelta(subscribers, [{ path: 'navigation.attitude', value: { roll: 0.1 } }]);
+      deliverDelta(subscribers, [
+        { path: 'environment.wind.speedApparent', value: 5.0 },
+        { path: 'environment.wind.angleApparent', value: 0.5 },
+      ]);
+      await drainTicks(5);
+
+      const values = sentDeltas.flatMap(d => (d?.updates ?? []).flatMap(u => u?.values ?? []));
+      assert.ok(values.length > 0, 'expected at least one published value');
+      for (const v of values) {
+        if (typeof v.value === 'number') {
+          assert.ok(Number.isFinite(v.value), `${v.path} should stay finite when attitude.pitch is missing`);
+        }
+      }
+    } finally {
+      if (plugin) await plugin.stop();
+      cleanup();
+    }
+  });
+});
+
+describe('initialization order (subscription race)', () => {
+  /**
+   * Some subscriptions can deliver a value synchronously during subscribe() itself
+   * (e.g. a boot-time bootstrap fallback, or a server that already has a cached
+   * value for the path). This shim reproduces that by invoking deltaCb immediately
+   * for environment.wind.speedApparent/angleApparent, which drives apparentWind's
+   * onDelta (and therefore calculate()) before plugin.start() has returned.
+   */
+  function createSyncBootstrapShim(pluginOptions = {}) {
+    const { app: base, cleanup } = createAppShim();
+    const subscribers = new Map();
+    const bootstrapValues = {
+      'environment.wind.speedApparent': 4.0,
+      'environment.wind.angleApparent': 0.3,
+    };
+
+    const app = new Proxy(base, {
+      get(target, prop) {
+        if (prop === 'subscriptionmanager') {
+          return {
+            subscribe(msg, unsubscribes, _err, deltaCb) {
+              for (const s of (msg.subscribe || [])) {
+                if (!subscribers.has(s.path)) subscribers.set(s.path, new Set());
+                subscribers.get(s.path).add(deltaCb);
+                if (Object.prototype.hasOwnProperty.call(bootstrapValues, s.path)) {
+                  deltaCb({ updates: [{ $source: 'boot', values: [{ path: s.path, value: bootstrapValues[s.path] }] }] });
+                }
+              }
+              const unsub = () => {
+                for (const s of (msg.subscribe || [])) subscribers.get(s.path)?.delete(deltaCb);
+              };
+              if (Array.isArray(unsubscribes)) unsubscribes.push(unsub);
+            },
+          };
+        }
+        if (prop === 'handleMessage') return () => {};
+        if (prop === 'readPluginOptions') return () => ({ configuration: pluginOptions });
+        if (prop in target) return target[prop];
+        if (typeof prop === 'symbol') return undefined;
+        return () => {};
+      },
+    });
+
+    return { app, cleanup, subscribers };
+  }
+
+  it('does not throw when apparentWind delivers synchronously during subscribe (start-time race)', () => {
+    const { app, cleanup } = createSyncBootstrapShim({ backCalculateApparentWind: true });
+    let plugin;
+    try {
+      plugin = require('../index.js')(app);
+      assert.doesNotThrow(() => plugin.start(), 'plugin.start() must not throw on a synchronous bootstrap delta');
+    } finally {
+      if (plugin) plugin.stop?.();
       cleanup();
     }
   });
