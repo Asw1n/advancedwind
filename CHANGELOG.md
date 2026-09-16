@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 - Attitude derivative sampling now ignores incomplete roll/pitch updates and resets cleanly after smoother changes, preventing spurious sensor-speed spikes during mast heel and mast movement corrections.
+- Webapp values and warnings now share per-path lifecycle status, distinguish subscribed and computed data, report polar magnitude and angle independently, and stop showing cached wind-shift values when detection is disabled.
 
 ## [2.9.4] - 2026-09-06
 

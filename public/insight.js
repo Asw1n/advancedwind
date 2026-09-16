@@ -208,7 +208,6 @@ let state = {
   attitudesById: {},
   tablesById: {}
 };
-let lifecycleWarnings = [];
 let config = null;
 let _prevWarningsText = null;
 
@@ -257,9 +256,7 @@ async function fetchReport() {
     }
 
     setMessage("");
-    const data = await response.json();
-    lifecycleWarnings = Array.isArray(data.lifecycleWarnings) ? data.lifecycleWarnings : [];
-    return data;
+    return response.json();
   } catch (err) {
     console.error(err);
     setMessage(`Error fetching report: ${err.message}`);
@@ -684,6 +681,115 @@ function formatStateValue(type, data) {
   }
 }
 
+const computedItemIds = new Set([
+  "sensorSpeed", "misalignIn", "misalignOut", "mastRotIn", "mastRotOut",
+  "mastHeelIn", "mastHeelOut", "mastMoveIn", "mastMoveOut", "upwashIn",
+  "upwashOut", "upwashAngle", "leewayIn", "leewayOut", "trueWindIn",
+  "heightIn", "heightOut", "backCalcOut", "groundWindIn", "boatSpeed",
+  "calculatedWind", "trueWind", "groundWind", "windShiftFast", "windShiftSlow",
+  "windShift"
+]);
+
+function getPathStatus(pathState, hasValue, computed = false, computedReady = false) {
+  if (computed) {
+    return hasValue && computedReady
+      ? { category: "computed", reason: "" }
+      : { category: "inactive", reason: "not computed" };
+  }
+  if (pathState?.subscribed === false) {
+    return { category: "inactive", reason: "not subscribed" };
+  }
+  if (hasValue && pathState?.ready === true) {
+    return { category: "subscribed", reason: "" };
+  }
+  if (!pathState) {
+    return { category: "problem", reason: "not available" };
+  }
+  if (pathState.pathKnown === false) {
+    return { category: "problem", reason: "path not found in Signal K" };
+  }
+  if (pathState.hasDelta === false) {
+    return { category: "problem", reason: "waiting for first data" };
+  }
+  if (pathState.isStale === true) {
+    return { category: "problem", reason: "data is stale" };
+  }
+  return { category: "problem", reason: "not available" };
+}
+
+function getScalarPathState(state) {
+  if (!state?.handler) return state;
+  return {
+    ...state,
+    subscribed: state.handler.subscribed,
+    pathKnown: state.handler.pathKnown,
+    hasDelta: state.hasDelta === true && state.handler.hasDelta === true,
+    isStale: state.isStale === true || state.handler.isStale === true,
+    ready: state.ready === true && state.handler.ready === true
+  };
+}
+
+function getItemStatuses(item, data) {
+  const label = meta[item.id]?.displayName ?? item.id;
+  const computed = computedItemIds.has(item.id);
+  const windShiftEnabled = !item.id.startsWith("windShift") || config?.detectWindShift === true;
+  const computedReady = windShiftEnabled && data?.state?.ready === true;
+  if (item.type === "polar") {
+    return [
+      {
+        label: `${label} magnitude`,
+        status: getPathStatus(data?.state?.magnitude, Number.isFinite(data?.magnitude), computed, computedReady)
+      },
+      {
+        label: `${label} angle`,
+        status: getPathStatus(
+          data?.state?.angle,
+          Number.isFinite(data?.angle),
+          computed || data?.state?.angleFallbackActive === true,
+          computedReady
+        )
+      }
+    ];
+  }
+
+  const pathState = getScalarPathState(data?.state);
+  const hasValue = item.type === "attitude"
+    ? Number.isFinite(data?.value?.roll) || Number.isFinite(data?.value?.pitch)
+    : Number.isFinite(data?.value);
+  return [{ label, status: getPathStatus(pathState, hasValue, computed, computedReady) }];
+}
+
+function isAvailableStatus(status) {
+  return status.category === "subscribed" || status.category === "computed";
+}
+
+function formatDisplayValue(item, data) {
+  const statuses = getItemStatuses(item, data);
+  if (item.type !== "polar") {
+    return isAvailableStatus(statuses[0].status)
+      ? formatStateValue(item.type, data)
+      : statuses[0].status.reason;
+  }
+
+  const m = meta[item.id];
+  const magnitude = isAvailableStatus(statuses[0].status)
+    ? _formatUnit(data.magnitude, m?.magnitude?.displayUnits, m?.magnitude?.units)
+    : statuses[0].status.reason;
+  const angle = isAvailableStatus(statuses[1].status)
+    ? _formatUnit(data.angle, m?.angle?.displayUnits, m?.angle?.units)
+    : statuses[1].status.reason;
+  return `${magnitude} / ${angle}`;
+}
+
+function getProblemMessages(items) {
+  return items.flatMap(item => {
+    const data = getStateItem(item);
+    return getItemStatuses(item, data)
+      .filter(({ status }) => status.category === "problem")
+      .map(({ label, status }) => `"${label}" — ${status.reason}`);
+  });
+}
+
 // Maps SVG element id (= svgRole) to the CSS custom property controlling its stroke colour.
 // Used by createDataTable to look up the swatch colour from item.svgRole.
 const _svgIdColorVar = {
@@ -709,7 +815,6 @@ function createDataTable(items) {
     const row  = table.insertRow();
     row.dataset.itemId   = item.id;
     row.dataset.itemType = item.type;
-    if (isNotReady(data)) row.className = "not-ready";
     const nameCell = row.insertCell();
     nameCell.textContent = meta[item.id]?.displayName ?? item.id;
     const colorVar = item.svgRole && _activeSvgIds.has(item.svgRole) ? _svgIdColorVar[item.svgRole] : null;
@@ -720,7 +825,7 @@ function createDataTable(items) {
       nameCell.appendChild(swatch);
     }
     const valCell = row.insertCell();
-    valCell.textContent = data ? formatStateValue(item.type, data) : "—";
+    valCell.textContent = formatDisplayValue(item, data);
   });
   return table;
 }
@@ -788,38 +893,6 @@ function createParamControl(key, meta, value, readOnly) {
     container.appendChild(inp);
   }
   return container;
-}
-
-// Return true if a state item is not ready (absent or state.ready !== true).
-function isNotReady(data) {
-  if (!data) return true;
-  return data.state?.ready !== true;
-}
-
-// Return a human-readable reason why a state item is not ready.
-// Inspects the new state fields (subscribed, pathKnown, sourceNotFound, hasDelta, isStale)
-// from signalkutilities. For smoothers these fields live under handler/magnitude/angle;
-// for plain Polars they are at the top level.
-function getNotReadyReason(data) {
-  const s = data?.state;
-  if (!s) return "no data";
-
-  // Collect the sub-states that carry subscribed/pathKnown/sourceNotFound.
-  // MessageSmoother / SmoothedAngle → s.handler
-  // PolarSmoother → s.magnitude + s.angle
-  // Plain Polar / MessageHandler → s itself
-  const handlerStates = [];
-  if (s.handler)    handlerStates.push(s.handler);
-  if (s.magnitude)  handlerStates.push(s.magnitude);
-  if (s.angle)      handlerStates.push(s.angle);
-  if (handlerStates.length === 0) handlerStates.push(s);
-
-  if (handlerStates.some(h => h.subscribed    === false)) return "not subscribed to Signal K";
-  if (handlerStates.some(h => h.pathKnown     === false)) return "path not found in Signal K";
-  if (handlerStates.some(h => h.sourceNotFound === true)) return "configured source not producing data";
-  if (s.hasDelta === false)                               return "waiting for first data";
-  if (s.isStale  === true)                                return "data is stale";
-  return "not available";
 }
 
 // Collect human-readable reasons why a correction step's parameters are invalid.
@@ -985,15 +1058,9 @@ function renderPanelLive(step) {
     outputsEl.appendChild(createDataTable(cfgOutputs));
   }
 
-  // 7. Warnings — check all configured inputs for readiness across all steps.
+  // 7. Warnings — derive problems from the same statuses shown in the value cells.
   warningsEl.innerHTML = "";
-  if (step.id !== "inputs") {
-    return;
-  }
-  const notReadyReasons = [];
-  lifecycleWarnings.forEach(w => {
-    if (w && typeof w.message === "string") notReadyReasons.push(w.message);
-  });
+  const notReadyReasons = getProblemMessages([...(cfgInputs || []), ...(cfgOutputs || [])]);
   if (notReadyReasons.length > 0) {
     warningsEl.appendChild(sceneSectionHeading("Warnings"));
     const list = document.createElement("ul");
@@ -1015,8 +1082,8 @@ function _updateDataTable(tableEl, items) {
     const row = rows[i];
     if (!row) return;
     const data = getStateItem(item);
-    row.className = isNotReady(data) ? "not-ready" : "";
-    row.cells[1].textContent = data ? formatStateValue(item.type, data) : "—";
+    row.className = "";
+    row.cells[1].textContent = formatDisplayValue(item, data);
   });
 }
 
@@ -1036,19 +1103,8 @@ function renderPanelLiveFast(step) {
   _updateDataTable(inputsEl.querySelector('table'),  cfgInputs  || []);
   _updateDataTable(outputsEl.querySelector('table'), cfgOutputs || []);
 
-  if (step.id !== "inputs") {
-    if (_prevWarningsText !== "") {
-      _prevWarningsText = "";
-      warningsEl.innerHTML = "";
-    }
-    return;
-  }
-
   // Warnings: only touch the DOM when the content has actually changed.
-  const notReadyReasons = [];
-  lifecycleWarnings.forEach(w => {
-    if (w && typeof w.message === "string") notReadyReasons.push(w.message);
-  });
+  const notReadyReasons = getProblemMessages([...(cfgInputs || []), ...(cfgOutputs || [])]);
   const warningsText = notReadyReasons.join('\n');
   if (warningsText === _prevWarningsText) return;
   _prevWarningsText = warningsText;

@@ -436,6 +436,75 @@ function createCapturingShim(pluginOptions = {}) {
   return { app, cleanup, subscribers, sentDeltas };
 }
 
+describe('wind shift lifecycle', () => {
+  it('invalidates the computed shift when detection is disabled', async () => {
+    const { app, cleanup, subscribers } = createCapturingShim({
+      detectWindShift: true,
+      windShiftFastClass: 'PassThroughSmoother',
+      windShiftSlowClass: 'PassThroughSmoother',
+    });
+
+    try {
+      const plugin = require('../index.js')(app);
+      const routes = {};
+      plugin.registerWithRouter({
+        get: (path, handler) => { routes[`GET ${path}`] = handler; },
+        put: (path, handler) => { routes[`PUT ${path}`] = handler; },
+      });
+      plugin.start();
+
+      deliverDelta(subscribers, [
+        { path: 'environment.wind.directionTrue', value: 0.5 },
+      ]);
+      deliverDelta(subscribers, [
+        { path: 'environment.wind.directionTrue', value: 0.6 },
+      ]);
+
+      let report;
+      routes['GET /report']({}, { json: data => { report = data; } });
+      assert.strictEqual(report.deltas.windShift.state.ready, true);
+      assert.strictEqual(report.deltas.windShiftFast.state.handler.subscribed, true);
+      assert.strictEqual(report.deltas.windShiftSlow.state.handler.subscribed, true);
+
+      routes['PUT /settings'](
+        { body: { detectWindShift: false } },
+        { json: () => {} }
+      );
+      routes['GET /report']({}, { json: data => { report = data; } });
+
+      assert.strictEqual(report.deltas.windShift.state.ready, false);
+      assert.strictEqual(report.deltas.windShift.state.hasDelta, false);
+      assert.strictEqual(report.deltas.windShiftFast.state.handler.subscribed, false);
+      assert.strictEqual(report.deltas.windShiftSlow.state.handler.subscribed, false);
+
+      routes['PUT /settings'](
+        { body: { detectWindShift: true } },
+        { json: () => {} }
+      );
+      routes['GET /report']({}, { json: data => { report = data; } });
+      assert.strictEqual(report.deltas.windShiftFast.state.handler.subscribed, true);
+      assert.strictEqual(report.deltas.windShiftSlow.state.handler.subscribed, true);
+      assert.strictEqual(report.deltas.windShiftFast.state.ready, false);
+      assert.strictEqual(report.deltas.windShiftSlow.state.ready, false);
+
+      deliverDelta(subscribers, [
+        { path: 'environment.wind.directionTrue', value: 0.7 },
+      ]);
+      deliverDelta(subscribers, [
+        { path: 'environment.wind.directionTrue', value: 0.8 },
+      ]);
+      routes['GET /report']({}, { json: data => { report = data; } });
+      assert.strictEqual(report.deltas.windShiftFast.state.ready, true);
+      assert.strictEqual(report.deltas.windShiftSlow.state.ready, true);
+      assert.strictEqual(report.deltas.windShift.state.ready, true);
+
+      await plugin.stop();
+    } finally {
+      cleanup();
+    }
+  });
+});
+
 describe('memory leak / feedback loop detection (Issue #22)', () => {
   it('handleMessage call count stays bounded without feedback (sanity check)', async () => {
     // No feedback shim — handleMessage is a no-op counter.

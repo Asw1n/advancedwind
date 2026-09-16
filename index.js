@@ -430,6 +430,7 @@ module.exports = function (app) {
   }
 
   function clearWindShiftOutputs() {
+    windShift?.invalidate();
     MessageHandler.clear(app, plugin.id, [
       { path: 'environment.wind.directionTrue.trend.fast' },
       { path: 'environment.wind.directionTrue.trend.slow' },
@@ -748,6 +749,7 @@ module.exports = function (app) {
     // subscribeOptions:{} disables excludeSelf so the plugin's own directionTrue output is received.
     windShiftFast = new SmoothedAngle(app, plugin.id, 'windShiftFast',
       'environment.wind.directionTrue', {
+      subscribe: options.detectWindShift,
       subscribeOptions: {},
       angleRange: '0to2pi',
       meta: { displayName: 'Fast mean wind direction', plane: 'Ground', units: 'rad', displayUnits: { category: 'angle' } },
@@ -796,6 +798,7 @@ module.exports = function (app) {
 
     windShiftSlow = new SmoothedAngle(app, plugin.id, 'windShiftSlow',
       'environment.wind.directionTrue', {
+      subscribe: options.detectWindShift,
       subscribeOptions: {},
       angleRange: '0to2pi',
       meta: { displayName: 'Slow mean wind direction (reference)', plane: 'Ground', units: 'rad', displayUnits: { category: 'angle' } },
@@ -1050,8 +1053,14 @@ module.exports = function (app) {
             break;
           case 'detectWindShift':
             if (value) {
+              if (!windShiftFast?.subscribed) windShiftFast?.subscribe(false, true);
+              if (!windShiftSlow?.subscribed) windShiftSlow?.subscribe(false, true);
               sendWindShiftMeta();
             } else {
+              windShiftFast?.unsubscribe();
+              windShiftSlow?.unsubscribe();
+              clearLifecycleWarning('windShiftFast');
+              clearLifecycleWarning('windShiftSlow');
               clearWindShiftOutputs();
             }
             break;
