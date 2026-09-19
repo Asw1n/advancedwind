@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - Configuration migration now safely normalizes legacy, nested, malformed, and unsupported settings without repeatedly converting sensor misalignment values.
 - Webapp polling now waits for each report request to finish, backs off when the plugin is unavailable, and avoids repeatedly rebuilding the settings view.
+- Webapp polling now follows the plugin's smoothed calculation interval within bounded limits and uses a five-second interval when the plugin is unavailable.
 
 ## [2.9.5] - 2026-09-17
 

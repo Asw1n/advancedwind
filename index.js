@@ -203,6 +203,8 @@ module.exports = function (app) {
   let windShiftLastSend = 0;  // timestamp (ms) of last wind-shift SK bus write — used to throttle to 1 Hz
   let lifecycleWarnings = [];
   let lifecycleWarningMap = new Map();
+  let calculationIntervalSmoother = null;
+  let lastCalculationTime = null;
   // Hoisted so the PUT /settings handler can drain changedOptions immediately.
   // Without this, a stale source filter deadlocks the cycle: calculate() only
   // runs after the smoother samples, and the smoother won't sample while the
@@ -309,6 +311,9 @@ module.exports = function (app) {
         try {
           const payload = reportFull.report();
           payload.lifecycleWarnings = lifecycleWarnings;
+          payload.pollIntervalMs = calculationIntervalSmoother?.estimate
+            ? calculationIntervalSmoother.estimate * 1000
+            : 1000;
           res.json(payload);
         } catch (err) {
           app.error(`AdvancedWind /report error: ${err.message}`);
@@ -432,6 +437,8 @@ module.exports = function (app) {
     const STATIONARY_SOG_THRESHOLD = 0.257; // m/s ≈ 0.5 kn — boat considered stationary
     const outputs = [];
     reportFull = new Reporter();
+    calculationIntervalSmoother = new ExponentialSmoother({ tau: 10 });
+    lastCalculationTime = null;
 
     function sendWindShiftMeta() {
       MessageHandler.sendMeta(app, plugin.id, [
@@ -854,6 +861,12 @@ module.exports = function (app) {
       // Guards against a partial delta (e.g. magnitude arriving without angle yet,
       // as can happen with a synchronous subscribe-time bootstrap value).
       if (!apparentWind.ready) return;
+      const now = Date.now();
+      if (lastCalculationTime !== null) {
+        const interval = (now - lastCalculationTime) / 1000;
+        if (interval > 0) calculationIntervalSmoother.add(interval);
+      }
+      lastCalculationTime = now;
       // Re-read options at runtime so /config changes take effect
       if (hasChangedOptions) applyOptionChanges();
 

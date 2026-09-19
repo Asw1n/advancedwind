@@ -211,7 +211,9 @@ let state = {
 let config = null;
 let _prevWarningsText = null;
 const POLL_INTERVAL_MS = 1000;
-const MAX_POLL_BACKOFF_MS = 30000;
+const CONNECTION_LOST_INTERVAL_MS = 5000;
+const MIN_POLL_INTERVAL_MS = 100;
+const MAX_POLL_INTERVAL_MS = 5000;
 let pollBackoffMs = POLL_INTERVAL_MS;
 let reportUnavailable = false;
 
@@ -1173,6 +1175,7 @@ function renderAll() {
 async function tick() {
   const data = await fetchReport();
   if (!data) {
+    pollBackoffMs = CONNECTION_LOST_INTERVAL_MS;
     if (!reportUnavailable) {
       // A failed fetch may mean the server restarted; re-sync config once,
       // then refresh the settings panel so controls reflect the new config.
@@ -1183,6 +1186,14 @@ async function tick() {
     return false;
   }
   reportUnavailable = false;
+  if (Number.isFinite(data.pollIntervalMs) && data.pollIntervalMs > 0) {
+    pollBackoffMs = Math.min(
+      Math.max(data.pollIntervalMs, MIN_POLL_INTERVAL_MS),
+      MAX_POLL_INTERVAL_MS
+    );
+  } else {
+    pollBackoffMs = POLL_INTERVAL_MS;
+  }
   normaliseState(data);
   _computeDerivedPolars(config || {}, state);
   render();
@@ -1191,11 +1202,6 @@ async function tick() {
 
 async function poll() {
   const available = await tick();
-  if (available) {
-    pollBackoffMs = POLL_INTERVAL_MS;
-  } else {
-    pollBackoffMs = Math.min(pollBackoffMs * 2, MAX_POLL_BACKOFF_MS);
-  }
   setTimeout(poll, pollBackoffMs);
 }
 
