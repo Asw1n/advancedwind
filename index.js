@@ -103,70 +103,51 @@ module.exports = function (app) {
 
   function readOptions() {
     const stored = app.readPluginOptions();
-    // Unwrap double-nested configuration if present (migration)
-    let temp = stored.configuration || {};
-    if (temp.configuration) {
+    const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+    let temp = isObject(stored) && isObject(stored.configuration) ? stored.configuration : {};
+    let migrated = Object.keys(temp).length === 0;
+
+    // Older server/configuration combinations could wrap the plugin settings twice.
+    if (isObject(temp.configuration)) {
       app.debug("Migrating double-nested configuration");
-      options = clampOptions({ ...temp.configuration });
-      saveOptions();
-      return;
+      temp = temp.configuration;
+      migrated = true;
     }
-    if (Object.keys(temp).length === 0) {
-      options = { ...defaultOptions };
-      app.debug("No existing options found, using defaults:", options);
-      saveOptions();
-      return;
+
+    if (!isObject(temp)) {
+      temp = {};
+      migrated = true;
     }
-    if (!temp.version) {
-      app.debug(`Converting options to version ${currentVersion}`);
-      options = { ...options, ...temp };
-      options = { ...options, ...temp.dataSources };
-      options = { ...options, ...temp.corrections };
-      options = { ...options, ...temp.outputOptions };
-      options = { ...options, ...temp.parameters };
-      options.sensorMisalignment = (options.sensorMisalignment || 0) * Math.PI / 180;
-      options.version = currentVersion;
-      options = clampOptions(options);
-      saveOptions();
-      return;
+
+    const version = temp.version;
+    const supportedVersions = [undefined, '3.0', '3.1', '3.2', '3.3', currentVersion];
+    if (!supportedVersions.includes(version)) {
+      app.setPluginError(`Unsupported Advanced Wind configuration version: ${version}`);
+      temp = {};
+      migrated = true;
     }
-    else if (temp.version === "3.0") {
-      options = { ...defaultOptions, ...temp };
-      options.sensorMisalignment = (options.sensorMisalignment || 0) * Math.PI / 180;
-      options = clampOptions(options);
-      options.version = currentVersion;
-      saveOptions();
-      return;
+
+    const legacyGroups = [temp.dataSources, temp.corrections, temp.outputOptions, temp.parameters]
+      .filter(isObject)
+      .reduce((result, group) => ({ ...result, ...group }), {});
+    const normalized = { ...defaultOptions, ...temp, ...legacyGroups };
+    if (version === undefined || version === '3.0' || version === '3.1') {
+      // These formats stored sensorMisalignment in degrees. Current settings use radians.
+      normalized.sensorMisalignment = (normalized.sensorMisalignment || 0) * Math.PI / 180;
+      migrated = true;
     }
-    else if (temp.version === "3.1") {
-      // sensorMisalignment was stored in degrees; convert to radians.
-      options = { ...defaultOptions, ...temp };
-      options.sensorMisalignment = (options.sensorMisalignment || 0) * Math.PI / 180;
-      options = clampOptions(options);
-      options.version = currentVersion;
-      saveOptions();
-      return;
-    }
-    else if (temp.version === "3.2") {
-      options = clampOptions({ ...defaultOptions, ...temp });
-      options.version = currentVersion;
-      saveOptions();
-      return;
-    }
-    else if (temp.version === "3.3") {
-      // Strip obsolete source-selection fields — Signal K server manages source priorities in v2.
-      options = clampOptions({ ...defaultOptions, ...temp });
+
+    // Strip obsolete source-selection fields — Signal K server manages source priorities in v2.
+    if (version === '3.3') {
       const obsolete = ['headingSource', 'attitudeSource', 'boatSpeedSource', 'leewaySource',
                         'windSpeedSource', 'rotationSource', 'groundSpeedSource', 'preventDuplication'];
-      obsolete.forEach(k => delete options[k]);
-      options.version = currentVersion;
-      saveOptions();
-      return;
+      obsolete.forEach(key => delete normalized[key]);
+      migrated = true;
     }
-    else if (temp.version === currentVersion) {
-      options = clampOptions({ ...defaultOptions, ...temp });
-      return;
-    }
+
+    normalized.version = currentVersion;
+    options = clampOptions(normalized);
+    if (migrated || version !== currentVersion) saveOptions();
   }
 
   function saveOptions() {

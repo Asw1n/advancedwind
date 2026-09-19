@@ -261,6 +261,65 @@ describe('registerWithRouter', () => {
   });
 });
 
+describe('configuration migration', () => {
+  function createMigrationShim(pluginOptions) {
+    const { app: base, cleanup } = createAppShim();
+    let savedOptions = null;
+    const app = new Proxy(base, {
+      get(target, prop) {
+        if (prop === 'readPluginOptions') return () => ({ configuration: pluginOptions });
+        if (prop === 'savePluginOptions') return (config, cb) => {
+          savedOptions = config;
+          if (cb) cb();
+        };
+        if (prop in target) return target[prop];
+        if (typeof prop === 'symbol') return undefined;
+        return () => {};
+      },
+    });
+    return { app, cleanup, getSavedOptions: () => savedOptions };
+  }
+
+  it('normalizes nested legacy settings once and preserves the result on restart', () => {
+    const shim = createMigrationShim({ configuration: { sensorMisalignment: 90 } });
+    try {
+      const plugin = require('../index.js')(shim.app);
+      plugin.registerWithRouter({ get: () => {}, put: () => {} });
+      const first = shim.getSavedOptions();
+
+      assert.strictEqual(first.version, '3.4');
+      assert.strictEqual(first.sensorMisalignment, Math.PI / 2);
+      assert.strictEqual(first.backCalculateApparentWind, true);
+
+      const secondShim = createMigrationShim(first);
+      try {
+        const secondPlugin = require('../index.js')(secondShim.app);
+        secondPlugin.registerWithRouter({ get: () => {}, put: () => {} });
+        assert.strictEqual(secondShim.getSavedOptions(), null, 'current settings should not be migrated again');
+      } finally {
+        secondShim.cleanup();
+      }
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it('recovers malformed and unsupported configurations with current defaults', () => {
+    for (const invalid of [null, { version: '9.9' }]) {
+      const shim = createMigrationShim(invalid);
+      try {
+        const plugin = require('../index.js')(shim.app);
+        assert.doesNotThrow(() => plugin.registerWithRouter({ get: () => {}, put: () => {} }));
+        const saved = shim.getSavedOptions();
+        assert.strictEqual(saved.version, '3.4');
+        assert.strictEqual(saved.backCalculateApparentWind, true);
+      } finally {
+        shim.cleanup();
+      }
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Memory-leak / feedback-loop detection
 //

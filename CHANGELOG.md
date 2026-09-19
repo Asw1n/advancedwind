@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
+## Unreleased
+
+### Fixed
+- Configuration migration now safely normalizes legacy, nested, malformed, and unsupported settings without repeatedly converting sensor misalignment values.
+
 ## [2.9.5] - 2026-09-17
 
 ### Fixed
