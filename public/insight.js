@@ -210,6 +210,10 @@ let state = {
 };
 let config = null;
 let _prevWarningsText = null;
+const POLL_INTERVAL_MS = 1000;
+const MAX_POLL_BACKOFF_MS = 30000;
+let pollBackoffMs = POLL_INTERVAL_MS;
+let reportUnavailable = false;
 
 // Navigation / steps
 const steps = [
@@ -1169,23 +1173,37 @@ function renderAll() {
 async function tick() {
   const data = await fetchReport();
   if (!data) {
-    // A failed fetch may mean the server restarted; re-sync config in case it changed,
-    // then refresh the settings panel so controls reflect the new config.
-    await fetchConfig();
-    renderAll();
-    return;
+    if (!reportUnavailable) {
+      // A failed fetch may mean the server restarted; re-sync config once,
+      // then refresh the settings panel so controls reflect the new config.
+      reportUnavailable = true;
+      await fetchConfig();
+      renderAll();
+    }
+    return false;
   }
+  reportUnavailable = false;
   normaliseState(data);
   _computeDerivedPolars(config || {}, state);
   render();
+  return true;
+}
+
+async function poll() {
+  const available = await tick();
+  if (available) {
+    pollBackoffMs = POLL_INTERVAL_MS;
+  } else {
+    pollBackoffMs = Math.min(pollBackoffMs * 2, MAX_POLL_BACKOFF_MS);
+  }
+  setTimeout(poll, pollBackoffMs);
 }
 
 async function start() {
   await loadMeta();
   await fetchConfig();
   renderAll();
-  await tick();
-  setInterval(tick, 100);
+  await poll();
 }
 
 window.addEventListener("DOMContentLoaded", () => {
