@@ -2,7 +2,9 @@
 
 Advanced Wind is a SignalK server plugin that calculates true wind, back-calculated apparent wind, and ground wind from your boat's sensor data. Beyond a basic true-wind calculation it applies a chain of optional, individually tunable corrections that improve the quality of the result. The built-in webapp lets you inspect each step of the calculation live and change every setting while the plugin is running.
 
-The current runtime behaviour is also more explicit than in older releases: if an input goes idle or stale, the webapp shows a lifecycle warning and the plugin attempts to resubscribe; when a correction or output is disabled, the relevant Signal K paths are cleared with `null` instead of being left stale.
+Requires signalk-server >=2.35.0 for reliable metadata-first input subscriptions.
+
+If an input goes idle or stale, the webapp shows a lifecycle warning while the subscription stays attached, ready for the next delta; when a correction or output is disabled, the relevant Signal K paths are cleared with `null` instead of being left stale.
 
 ---
 

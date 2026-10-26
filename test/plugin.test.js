@@ -108,7 +108,7 @@ function createAppShim() {
     config: {
       configPath: tmpDir,
       appPath: tmpDir,
-      version: '2.28.0',
+      version: '2.35.0',
       name: 'signalk-server',
       basePath: '/signalk/v1',
       defaults: {},
@@ -767,8 +767,8 @@ describe('attitude guard clauses (missing spec sub-property)', () => {
 describe('initialization order (subscription race)', () => {
   /**
    * Some subscriptions can deliver a value synchronously during subscribe() itself
-   * (e.g. a boot-time bootstrap fallback, or a server that already has a cached
-   * value for the path). This shim reproduces that by invoking deltaCb immediately
+   * when the server already has a cached value for the path.
+   * This shim reproduces that by invoking deltaCb immediately
    * for environment.wind.speedApparent/angleApparent, which drives apparentWind's
    * onDelta (and therefore calculate()) before plugin.start() has returned.
    */
@@ -818,6 +818,68 @@ describe('initialization order (subscription race)', () => {
       assert.doesNotThrow(() => plugin.start(), 'plugin.start() must not throw on a synchronous bootstrap delta');
     } finally {
       if (plugin) plugin.stop?.();
+      cleanup();
+    }
+  });
+});
+
+describe('input silence without recovery resubscriptions', () => {
+  it('keeps subscriptions attached, reports silence and accepts resumed wind', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    const { app, cleanup } = createAppShim();
+    const subscribers = new Map();
+    let subscriptions = 0;
+    let unsubscriptions = 0;
+    let messages = 0;
+    app.readPluginOptions = () => ({ configuration: {
+      detectWindShift: true, correctForLeeway: true, rotationPath: 'sensors.mast.rotation',
+      windShiftFastTau: 1, windShiftSlowTau: 1
+    } });
+    app.handleMessage = () => { messages++; };
+    app.subscriptionmanager.subscribe = (msg, unsubscribes, _err, callback) => {
+      subscriptions++;
+      for (const { path } of msg.subscribe) {
+        if (!subscribers.has(path)) subscribers.set(path, new Set());
+        subscribers.get(path).add(callback);
+      }
+      unsubscribes.push(() => {
+        unsubscriptions++;
+        for (const { path } of msg.subscribe) subscribers.get(path).delete(callback);
+      });
+    };
+    const plugin = require('../index.js')(app);
+    try {
+      const routes = {};
+      plugin.registerWithRouter({
+        get: (p, cb) => { routes[p] = cb; }, put: () => {}
+      });
+      plugin.start();
+      deliverDelta(subscribers, [
+        { path: 'environment.wind.speedApparent', value: 5 },
+        { path: 'environment.wind.angleApparent', value: 0.4 }
+      ]);
+      const initialSubscriptions = subscriptions;
+      const initialMessages = messages;
+      t.mock.timers.tick(120000);
+      assert.equal(subscriptions, initialSubscriptions);
+      assert.equal(unsubscriptions, 0);
+      assert.equal(messages, initialMessages, 'silence must not publish cached inputs');
+      let report;
+      routes['/report']({}, { json: value => { report = value; } });
+      for (const id of ['apparentWind.smoothed', 'windShiftFast', 'windShiftSlow']) {
+        const warning = report.lifecycleWarnings.find(w => w.id === id);
+        assert.equal(warning?.status, 'idle', id);
+        assert.doesNotMatch(warning.message, /resubscrib/i);
+      }
+      deliverDelta(subscribers, [
+        { path: 'environment.wind.speedApparent', value: 6 },
+        { path: 'environment.wind.angleApparent', value: 0.5 }
+      ]);
+      routes['/report']({}, { json: value => { report = value; } });
+      assert.equal(report.lifecycleWarnings.some(w => w.id === 'apparentWind.smoothed'), false);
+      assert.equal(subscriptions, initialSubscriptions);
+    } finally {
+      await plugin.stop();
       cleanup();
     }
   });

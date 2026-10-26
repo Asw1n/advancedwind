@@ -6,7 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+### Changed
+- Requires signalk-server >=2.35.0 for the upstream metadata-first subscription fix ([SignalK/signalk-server#3216](https://github.com/SignalK/signalk-server/pull/3216)).
+
 ### Fixed
+- Removed idle-triggered input resubscriptions, including wind-shift inputs, to avoid replaying cached values during sensor outages. Idle/stale warnings remain, and existing subscriptions receive data when the source resumes. Configuration-driven subscription changes and synchronous startup safeguards are preserved.
 - Configuration migration now safely normalizes legacy, nested, malformed, and unsupported settings without repeatedly converting sensor misalignment values.
 - Webapp polling now waits for each report request to finish, backs off when the plugin is unavailable, and avoids repeatedly rebuilding the settings view.
 - Webapp polling now follows the plugin's smoothed calculation interval within bounded limits and uses a five-second interval when the plugin is unavailable.
@@ -158,5 +162,3 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 - Optional staleness detection
 - More precise warnings regarding the state of inputs
-
-
