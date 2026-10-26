@@ -772,12 +772,13 @@ describe('initialization order (subscription race)', () => {
    * for environment.wind.speedApparent/angleApparent, which drives apparentWind's
    * onDelta (and therefore calculate()) before plugin.start() has returned.
    */
-  function createSyncBootstrapShim(pluginOptions = {}) {
+  function createSyncBootstrapShim(pluginOptions = {}, extraBootstrap = {}) {
     const { app: base, cleanup } = createAppShim();
     const subscribers = new Map();
     const bootstrapValues = {
       'environment.wind.speedApparent': 4.0,
       'environment.wind.angleApparent': 0.3,
+      ...extraBootstrap,
     };
 
     const app = new Proxy(base, {
@@ -818,6 +819,113 @@ describe('initialization order (subscription race)', () => {
       assert.doesNotThrow(() => plugin.start(), 'plugin.start() must not throw on a synchronous bootstrap delta');
     } finally {
       if (plugin) plugin.stop?.();
+      cleanup();
+    }
+  });
+
+  const cachedAttitude = { 'navigation.attitude': { roll: 0.1, pitch: 0.02, yaw: 1.0 } };
+
+  function captureRoutes(plugin) {
+    const routes = { get: {}, put: {} };
+    plugin.registerWithRouter({
+      get: (p, cb) => { routes.get[p] = cb; },
+      put: (p, cb) => { routes.put[p] = cb; },
+    });
+    const call = (method, p, body) => {
+      let payload;
+      routes[method][p]({ body, query: {} }, { json: v => { payload = v; }, status: () => ({ json: v => { payload = v; } }) });
+      return payload;
+    };
+    return {
+      settings: () => call('get', '/settings'),
+      putSettings: body => call('put', '/settings', body),
+      report: () => call('get', '/report'),
+    };
+  }
+
+  it('does not throw when attitude delivers synchronously during subscribe with mast heel correction enabled', async () => {
+    const { app, cleanup } = createSyncBootstrapShim({ correctForMastHeel: true }, cachedAttitude);
+    let plugin;
+    try {
+      plugin = require('../index.js')(app);
+      assert.doesNotThrow(() => plugin.start(), 'plugin.start() must not throw on a synchronous attitude delta');
+      await plugin.stop();
+      assert.doesNotThrow(() => plugin.start(), 'restart must not throw on a synchronous attitude delta');
+    } finally {
+      if (plugin) await plugin.stop();
+      cleanup();
+    }
+  });
+
+  it('seeds the derivative from a synchronous attitude with mast movement correction enabled', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const { app, cleanup, subscribers } = createSyncBootstrapShim({
+      correctForMastMovement: true,
+      heightAboveWater: 10,
+    }, cachedAttitude);
+    let plugin;
+    try {
+      plugin = require('../index.js')(app);
+      const api = captureRoutes(plugin);
+      assert.doesNotThrow(() => plugin.start(), 'plugin.start() must not throw on a synchronous attitude delta');
+      assert.equal(api.report().polars.sensorSpeed.state.ready, false, 'one sample must not produce a sensor speed');
+
+      t.mock.timers.tick(100);
+      deliverDelta(subscribers, [{ path: 'navigation.attitude', value: { roll: 0.2, pitch: 0.02, yaw: 1.0 } }]);
+
+      const report = api.report();
+      const smoothed = report.attitudes['attitude.smoothed'].value;
+      const sensorSpeed = report.polars.sensorSpeed;
+      // The cached sample (roll 0.1, pitch 0.02) seeds the derivative: rate * height over 0.1 s.
+      const expectedY = ((smoothed.roll - 0.1) / 0.1) * 10;
+      const expectedX = ((smoothed.pitch - 0.02) / 0.1) * 10;
+      assert.equal(sensorSpeed.state.ready, true, 'second sample must produce a sensor speed');
+      assert.ok(expectedY > 0, 'smoothed roll should move towards the new sample');
+      assert.ok(Math.abs(sensorSpeed.y - expectedY) < 1e-9, `expected y = ${expectedY}, got ${sensorSpeed.y}`);
+      assert.ok(Math.abs(sensorSpeed.x - expectedX) < 1e-9, `expected x = ${expectedX}, got ${sensorSpeed.x}`);
+    } finally {
+      if (plugin) await plugin.stop();
+      cleanup();
+    }
+  });
+
+  it('applies pending attitude smoother settings on a synchronous attitude at startup', async () => {
+    const { app, cleanup } = createSyncBootstrapShim({ correctForMastHeel: true }, cachedAttitude);
+    let plugin;
+    try {
+      plugin = require('../index.js')(app);
+      const api = captureRoutes(plugin);
+      // Changed while stopped: stays pending until the plugin runs.
+      api.putSettings({ attitudeSmootherClass: 'ExponentialSmoother', attitudeSmootherTau: 2 });
+      assert.doesNotThrow(() => plugin.start(), 'plugin.start() must not throw with pending attitude smoother settings');
+      const settings = api.settings();
+      assert.equal(settings.attitudeSmootherClass, 'ExponentialSmoother');
+      assert.equal(settings.attitudeSmootherTau, 2);
+    } finally {
+      if (plugin) await plugin.stop();
+      cleanup();
+    }
+  });
+
+  it('applies pending smoother settings when cached wind and attitude arrive synchronously on restart', async () => {
+    const { app, cleanup } = createSyncBootstrapShim(
+      { correctForMastHeel: true, correctForMastMovement: true },
+      cachedAttitude,
+    );
+    let plugin;
+    try {
+      plugin = require('../index.js')(app);
+      const api = captureRoutes(plugin);
+      plugin.start();
+      await plugin.stop();
+      api.putSettings({ smootherTau: 1, attitudeSmootherTimeSpan: 2 });
+      assert.doesNotThrow(() => plugin.start(), 'restart must not throw with pending smoother settings');
+      const settings = api.settings();
+      assert.equal(settings.smootherTau, 1);
+      assert.equal(settings.attitudeSmootherTimeSpan, 2);
+      assert.equal(api.report().attitudes['attitude.smoothed'].state.ready, true);
+    } finally {
+      if (plugin) await plugin.stop();
       cleanup();
     }
   });

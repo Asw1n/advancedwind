@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Configuration migration now safely normalizes legacy, nested, malformed, and unsupported settings without repeatedly converting sensor misalignment values.
 - Webapp polling now waits for each report request to finish, backs off when the plugin is unavailable, and avoids repeatedly rebuilding the settings view.
 - Webapp polling now follows the plugin's smoothed calculation interval within bounded limits and uses a five-second interval when the plugin is unavailable.
+- The plugin no longer fails to start with `ReferenceError: Cannot access 'ATTITUDE_SMOOTHER_KEYS' before initialization` when mast heel or mast movement correction is enabled and the server already has a cached attitude value. Startup also stays safe when smoother settings were changed while the plugin was stopped. Thanks to @Dujekunbrazo ([#26](https://github.com/Asw1n/advancedwind/pull/26)).
 
 ## [2.9.5] - 2026-09-17
 
