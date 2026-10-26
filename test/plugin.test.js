@@ -5,6 +5,47 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const pluginFactory = require('../index.js');
+
+function withRoutePolicies(router) {
+  if (router.routePolicies instanceof Map) return router;
+
+  const policies = new Map();
+  const methods = ['get', 'post', 'put', 'patch', 'delete'];
+  const originalMethods = new Map();
+  for (const method of methods) {
+    if (typeof router[method] !== 'function') continue;
+    const original = router[method];
+    originalMethods.set(method, original);
+    router[method] = (route, ...handlers) => {
+      policies.set(`${method.toUpperCase()} ${route}`, 'admin');
+      return original.call(router, route, ...handlers);
+    };
+  }
+
+  router.access = (level) => {
+    if (level !== 'readonly' && level !== 'readwrite') {
+      throw new Error(`Unsupported route access level: ${level}`);
+    }
+    const scopedRouter = {};
+    for (const [method, original] of originalMethods) {
+      scopedRouter[method] = (route, ...handlers) => {
+        policies.set(`${method.toUpperCase()} ${route}`, level);
+        return original.call(router, route, ...handlers);
+      };
+    }
+    return scopedRouter;
+  };
+  router.routePolicies = policies;
+  return router;
+}
+
+function createTestPlugin(app) {
+  const plugin = pluginFactory(app);
+  const registerWithRouter = plugin.registerWithRouter;
+  plugin.registerWithRouter = (router) => registerWithRouter(withRoutePolicies(router));
+  return plugin;
+}
 
 // ---------------------------------------------------------------------------
 // App shim helpers
@@ -156,7 +197,7 @@ describe('plugin object shape', () => {
   before(() => {
     const shim = createAppShim();
     cleanup = shim.cleanup;
-    plugin = require('../index.js')(shim.app);
+    plugin = createTestPlugin(shim.app);
   });
 
   after(() => cleanup());
@@ -192,7 +233,7 @@ describe('registerWithRouter', () => {
   it('registers the expected GET and PUT routes', () => {
     const { app, cleanup } = createAppShim();
     try {
-      const plugin = require('../index.js')(app);
+      const plugin = createTestPlugin(app);
       const registered = [];
       const mockRouter = {
         get: (p) => registered.push(`GET ${p}`),
@@ -209,10 +250,30 @@ describe('registerWithRouter', () => {
     }
   });
 
+  it('applies readonly access only to the approved report routes', () => {
+    const { app, cleanup } = createAppShim();
+    try {
+      const plugin = createTestPlugin(app);
+      const router = { get: () => {}, put: () => {} };
+      plugin.registerWithRouter(router);
+
+      assert.deepStrictEqual(Object.fromEntries(router.routePolicies), {
+        'GET /meta': 'readonly',
+        'GET /state': 'readonly',
+        'GET /report': 'readonly',
+        'GET /settings': 'admin',
+        'PUT /settings': 'admin',
+        'GET /sources': 'readonly',
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
   it('GET /settings returns current options with _bounds', () => {
     const { app, cleanup } = createAppShim();
     try {
-      const plugin = require('../index.js')(app);
+      const plugin = createTestPlugin(app);
       const routes = {};
       const mockRouter = {
         get: (p, handler) => { routes[`GET ${p}`] = handler; },
@@ -236,7 +297,7 @@ describe('registerWithRouter', () => {
   it('PUT /settings clamps out-of-range numeric values', () => {
     const { app, cleanup } = createAppShim();
     try {
-      const plugin = require('../index.js')(app);
+      const plugin = createTestPlugin(app);
       const routes = {};
       const mockRouter = {
         get: (p, handler) => { routes[`GET ${p}`] = handler; },
@@ -283,7 +344,7 @@ describe('configuration migration', () => {
   it('normalizes nested legacy settings once and preserves the result on restart', () => {
     const shim = createMigrationShim({ configuration: { sensorMisalignment: 90 } });
     try {
-      const plugin = require('../index.js')(shim.app);
+      const plugin = createTestPlugin(shim.app);
       plugin.registerWithRouter({ get: () => {}, put: () => {} });
       const first = shim.getSavedOptions();
 
@@ -293,7 +354,7 @@ describe('configuration migration', () => {
 
       const secondShim = createMigrationShim(first);
       try {
-        const secondPlugin = require('../index.js')(secondShim.app);
+        const secondPlugin = createTestPlugin(secondShim.app);
         secondPlugin.registerWithRouter({ get: () => {}, put: () => {} });
         assert.strictEqual(secondShim.getSavedOptions(), null, 'current settings should not be migrated again');
       } finally {
@@ -308,7 +369,7 @@ describe('configuration migration', () => {
     for (const invalid of [null, { version: '9.9' }]) {
       const shim = createMigrationShim(invalid);
       try {
-        const plugin = require('../index.js')(shim.app);
+        const plugin = createTestPlugin(shim.app);
         assert.doesNotThrow(() => plugin.registerWithRouter({ get: () => {}, put: () => {} }));
         const saved = shim.getSavedOptions();
         assert.strictEqual(saved.version, '3.4');
@@ -504,7 +565,7 @@ describe('wind shift lifecycle', () => {
     });
 
     try {
-      const plugin = require('../index.js')(app);
+      const plugin = createTestPlugin(app);
       const routes = {};
       plugin.registerWithRouter({
         get: (path, handler) => { routes[`GET ${path}`] = handler; },
@@ -573,7 +634,7 @@ describe('memory leak / feedback loop detection (Issue #22)', () => {
     });
 
     try {
-      const plugin = require('../index.js')(app);
+      const plugin = createTestPlugin(app);
       plugin.start();
 
       deliverDelta(subscribers, [
@@ -608,7 +669,7 @@ describe('memory leak / feedback loop detection (Issue #22)', () => {
     });
 
     try {
-      const plugin = require('../index.js')(app);
+      const plugin = createTestPlugin(app);
       plugin.start();
 
       // Seed: one NMEA apparent-wind delta.
@@ -649,7 +710,7 @@ describe('memory leak / feedback loop detection (Issue #22)', () => {
     });
 
     try {
-      const plugin = require('../index.js')(app);
+      const plugin = createTestPlugin(app);
       plugin.start();
 
       if (typeof global.gc === 'function') global.gc(); // optional, needs --expose-gc
@@ -690,7 +751,7 @@ describe('plugin lifecycle', () => {
     const { app, cleanup } = createAppShim();
     let plugin;
     try {
-      plugin = require('../index.js')(app);
+      plugin = createTestPlugin(app);
       assert.doesNotThrow(() => plugin.start(), 'plugin.start() must not throw');
     } finally {
       if (plugin) {
@@ -706,7 +767,7 @@ describe('plugin lifecycle', () => {
   it('stop() resolves cleanly after start()', async () => {
     const { app, cleanup } = createAppShim();
     try {
-      const plugin = require('../index.js')(app);
+      const plugin = createTestPlugin(app);
       plugin.start();
       await assert.doesNotReject(
         () => plugin.stop(),
@@ -720,7 +781,7 @@ describe('plugin lifecycle', () => {
   it('can be restarted (start → stop → start → stop)', async () => {
     const { app, cleanup } = createAppShim();
     try {
-      const plugin = require('../index.js')(app);
+      const plugin = createTestPlugin(app);
       plugin.start();
       await plugin.stop();
       assert.doesNotThrow(() => plugin.start(), 'second start() must not throw');
@@ -739,7 +800,7 @@ describe('attitude guard clauses (missing spec sub-property)', () => {
     });
     let plugin;
     try {
-      plugin = require('../index.js')(app);
+      plugin = createTestPlugin(app);
       plugin.start();
 
       // Attitude delta missing pitch — only roll is present.
@@ -815,7 +876,7 @@ describe('initialization order (subscription race)', () => {
     const { app, cleanup } = createSyncBootstrapShim({ backCalculateApparentWind: true });
     let plugin;
     try {
-      plugin = require('../index.js')(app);
+      plugin = createTestPlugin(app);
       assert.doesNotThrow(() => plugin.start(), 'plugin.start() must not throw on a synchronous bootstrap delta');
     } finally {
       if (plugin) plugin.stop?.();
@@ -847,7 +908,7 @@ describe('initialization order (subscription race)', () => {
     const { app, cleanup } = createSyncBootstrapShim({ correctForMastHeel: true }, cachedAttitude);
     let plugin;
     try {
-      plugin = require('../index.js')(app);
+      plugin = createTestPlugin(app);
       assert.doesNotThrow(() => plugin.start(), 'plugin.start() must not throw on a synchronous attitude delta');
       await plugin.stop();
       assert.doesNotThrow(() => plugin.start(), 'restart must not throw on a synchronous attitude delta');
@@ -865,7 +926,7 @@ describe('initialization order (subscription race)', () => {
     }, cachedAttitude);
     let plugin;
     try {
-      plugin = require('../index.js')(app);
+      plugin = createTestPlugin(app);
       const api = captureRoutes(plugin);
       assert.doesNotThrow(() => plugin.start(), 'plugin.start() must not throw on a synchronous attitude delta');
       assert.equal(api.report().polars.sensorSpeed.state.ready, false, 'one sample must not produce a sensor speed');
@@ -893,7 +954,7 @@ describe('initialization order (subscription race)', () => {
     const { app, cleanup } = createSyncBootstrapShim({ correctForMastHeel: true }, cachedAttitude);
     let plugin;
     try {
-      plugin = require('../index.js')(app);
+      plugin = createTestPlugin(app);
       const api = captureRoutes(plugin);
       // Changed while stopped: stays pending until the plugin runs.
       api.putSettings({ attitudeSmootherClass: 'ExponentialSmoother', attitudeSmootherTau: 2 });
@@ -914,7 +975,7 @@ describe('initialization order (subscription race)', () => {
     );
     let plugin;
     try {
-      plugin = require('../index.js')(app);
+      plugin = createTestPlugin(app);
       const api = captureRoutes(plugin);
       plugin.start();
       await plugin.stop();
@@ -955,7 +1016,7 @@ describe('input silence without recovery resubscriptions', () => {
         for (const { path } of msg.subscribe) subscribers.get(path).delete(callback);
       });
     };
-    const plugin = require('../index.js')(app);
+    const plugin = createTestPlugin(app);
     try {
       const routes = {};
       plugin.registerWithRouter({

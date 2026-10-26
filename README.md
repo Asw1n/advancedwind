@@ -25,6 +25,12 @@ Install through the SignalK app store or by running `npm install advancedwind` i
 
 ---
 
+## HTTP endpoint access
+
+The live report (`/report`), runtime state (`/state`), metadata (`/meta`), and source-discovery placeholder (`/sources`) are available to Signal K read-only users. Reading or updating plugin settings (`/settings`) requires administrator access. Anonymous requests still follow the server's configured security policy; this plugin does not enable anonymous access.
+
+---
+
 ## The webapp — Advanced Wind Insight
 
 Open the webapp from **Webapps → Advanced Wind** in the SignalK dashboard. It serves as both the live display and the configuration interface. You do not need to restart the plugin after changing settings; changes take effect immediately.

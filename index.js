@@ -271,7 +271,7 @@ module.exports = function (app) {
 
 
     // Static metadata — serve once at webapp load
-    router.get('/meta', (req, res) => {
+    router.access('readonly').get('/meta', (req, res) => {
       if (!isRunning || !reportFull) {
         res.status(503).json({ error: "Plugin is not running" });
       } else {
@@ -285,7 +285,7 @@ module.exports = function (app) {
     });
 
     // Dynamic staleness — cheap poll (e.g. every 2 s)
-    router.get('/state', (req, res) => {
+    router.access('readonly').get('/state', (req, res) => {
       if (!isRunning || !reportFull) {
         res.status(503).json({ error: "Plugin is not running" });
       } else {
@@ -299,7 +299,7 @@ module.exports = function (app) {
     });
 
     // Full live report — frequent poll / SSE
-    router.get('/report', (req, res) => {
+    router.access('readonly').get('/report', (req, res) => {
       if (!isRunning || !reportFull) {
         res.status(503).json({ error: "Plugin is not running" });
       } else {
@@ -350,7 +350,7 @@ module.exports = function (app) {
 
     // Placeholder endpoint for discovering available sources per Signal K path.
     // Source selection is now managed by the Signal K server natively.
-    router.get('/sources', (req, res) => {
+    router.access('readonly').get('/sources', (req, res) => {
       const pathParam = req.query && req.query.path;
       if (!pathParam) {
         return res.status(400).json({ error: "Missing 'path' query parameter" });

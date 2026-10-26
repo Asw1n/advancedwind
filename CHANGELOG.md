@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - Requires signalk-server >=2.35.0 for the upstream metadata-first subscription fix ([SignalK/signalk-server#3216](https://github.com/SignalK/signalk-server/pull/3216)).
+- Read-only Signal K users can now access live reports, runtime state, metadata, and the source-discovery placeholder; settings reads and updates remain administrator-only.
 
 ### Fixed
 - Removed idle-triggered input resubscriptions, including wind-shift inputs, to avoid replaying cached values during sensor outages. Idle/stale warnings remain, and existing subscriptions receive data when the source resumes. Configuration-driven subscription changes and synchronous startup safeguards are preserved.
