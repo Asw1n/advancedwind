@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
-## Unreleased
+## [2.10.0] - 2026-10-26
 
 ### Changed
 - Updated the `signalkutilities` dependency to `^3.2.0`, including non-finite sample protection, explicit-null smoother resets, and subscription-manager-controlled startup values.
