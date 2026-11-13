@@ -9,6 +9,7 @@
   "files": [
     "icon.png",
     "index.js",
+    "attitude.js",
     "public/icon.png",
     "public/index.html",
     "public/insight.js",

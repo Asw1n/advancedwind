@@ -6,6 +6,11 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const pluginFactory = require('../index.js');
+const { AttitudeInput } = require('../attitude');
+const {
+  createSmoothedHandler, MovingAverageSmoother, ExponentialSmoother,
+  KalmanSmoother
+} = require('signalkutilities');
 
 function withRoutePolicies(router) {
   if (router.routePolicies instanceof Map) return router;
@@ -792,6 +797,353 @@ describe('plugin lifecycle', () => {
   });
 });
 
+describe('attitude input selection', () => {
+  it('logs initial preference and selected source changes without logging every sample', t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const { app, cleanup, subscribers } = createCapturingShim();
+    const messages = [];
+    app.debug = message => messages.push(message);
+    const input = new AttitudeInput({
+      app, pluginId: 'AdvancedWind',
+      options: { attitudeSmootherClass: 'MovingAverageSmoother' }
+    });
+    const sourceMessages = () => messages.filter(message =>
+      message.startsWith('[AdvancedWind] attitude '));
+    const sample = (path, value) => deliverDelta(subscribers, [{ path, value }]);
+    try {
+      input.syncSubscription({ correctForMastHeel: true });
+      assert.match(sourceMessages()[0], /enabled: preferring individual paths/);
+      sample('navigation.attitude.roll', 0.1);
+      sample('navigation.attitude.pitch', 0.2);
+      assert.ok(sourceMessages().includes(
+        '[AdvancedWind] attitude roll source: individual path navigation.attitude.roll'));
+      assert.ok(sourceMessages().includes(
+        '[AdvancedWind] attitude pitch source: individual path navigation.attitude.pitch'));
+      const count = sourceMessages().length;
+      sample('navigation.attitude.roll', 0.2);
+      sample('navigation.attitude.pitch', 0.3);
+      assert.equal(sourceMessages().length, count);
+
+      t.mock.timers.tick(60000);
+      assert.ok(sourceMessages().some(message => /roll source: unavailable/.test(message)));
+      sample('navigation.attitude', { roll: 0.1, pitch: 0.2 });
+      assert.ok(sourceMessages().includes(
+        '[AdvancedWind] attitude roll source: legacy object navigation.attitude'));
+      assert.ok(sourceMessages().includes(
+        '[AdvancedWind] attitude pitch source: legacy object navigation.attitude'));
+      sample('navigation.attitude.roll', 0.3);
+      assert.equal(sourceMessages().at(-1),
+        '[AdvancedWind] attitude roll source: individual path navigation.attitude.roll');
+      const mixedCount = sourceMessages().length;
+      sample('navigation.attitude', { roll: 0.4, pitch: 0.5 });
+      assert.equal(sourceMessages().length, mixedCount);
+      sample('navigation.attitude.pitch', 0.4);
+      assert.equal(sourceMessages().at(-1),
+        '[AdvancedWind] attitude pitch source: individual path navigation.attitude.pitch');
+      input.syncSubscription({});
+      assert.equal(sourceMessages().at(-1), '[AdvancedWind] attitude input disabled');
+      input.syncSubscription({ correctForMastMovement: true });
+      assert.match(sourceMessages().at(-1), /enabled: preferring individual paths/);
+    } finally {
+      input.terminate();
+      cleanup();
+    }
+  });
+
+  function inputFixture(options = {}) {
+    const shim = createCapturingShim();
+    const events = [];
+    const input = new AttitudeInput({
+      app: shim.app, pluginId: 'AdvancedWind',
+      options: { attitudeSmootherClass: 'MovingAverageSmoother', ...options },
+      onDelta: () => events.push('delta'),
+      onSourceChange: () => events.push('switch'),
+      onStale: () => events.push('stale'),
+      onIdle: () => events.push('idle')
+    });
+    const sample = (path, value) => deliverDelta(shim.subscribers, [{ path, value }]);
+    return { ...shim, input, events, sample };
+  }
+
+  it('uses only fresh roll/pitch paths without subscribing to legacy or yaw', t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const { input, sample, subscribers, cleanup } = inputFixture();
+    try {
+      input.syncSubscription({ correctForMastHeel: true });
+      for (let i = 0; i < 65; i++) {
+        sample('navigation.attitude.roll', 0.1);
+        sample('navigation.attitude.pitch', 0.2);
+        t.mock.timers.tick(1000);
+      }
+      assert.deepEqual(input.value, { roll: 0.1, pitch: 0.2 });
+      assert.equal(input.state.components.roll.selectedPath, 'navigation.attitude.roll');
+      assert.equal(input.state.components.pitch.selectedPath, 'navigation.attitude.pitch');
+      assert.equal(subscribers.has('navigation.attitude'), false);
+      assert.equal(subscribers.has('navigation.attitude.yaw'), false);
+      input.syncSubscription({ correctForMastMovement: true });
+      assert.equal(subscribers.get('navigation.attitude.roll').size, 1, 'toggling corrections must not duplicate subscriptions');
+    } finally {
+      input.terminate();
+      cleanup();
+    }
+  });
+
+  it('selects per component during partial migration and releases legacy on recovery', t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const { input, sample, subscribers, events, cleanup } = inputFixture();
+    try {
+      input.syncSubscription({ correctForMastHeel: true });
+      for (let i = 0; i < 60; i++) {
+        sample('navigation.attitude.roll', 0.1);
+        t.mock.timers.tick(1000);
+      }
+      assert.equal(subscribers.get('navigation.attitude').size, 1);
+      sample('navigation.attitude', { roll: 1, pitch: 0.2, yaw: 2 });
+      assert.deepEqual(input.value, { roll: 0.1, pitch: 0.2 });
+      assert.equal(input.state.components.roll.legacyFallback, false);
+      assert.equal(input.state.components.pitch.legacyFallback, true);
+      const countBeforeIgnored = events.length;
+      sample('navigation.attitude', { roll: 2 });
+      assert.equal(events.length, countBeforeIgnored, 'legacy roll must not drive calculations while primary roll is selected');
+      sample('navigation.attitude.pitch', 0.3);
+      assert.deepEqual(input.value, { roll: 0.1, pitch: 0.3 });
+      assert.equal(subscribers.get('navigation.attitude').size, 0);
+      assert.equal(events.at(-2), 'switch', 'recovery must reset motion history before processing its sample');
+      const count = events.length;
+      sample('navigation.attitude', { roll: 2, pitch: 2 });
+      assert.equal(events.length, count, 'unsubscribed legacy samples must not trigger calculations');
+    } finally {
+      input.terminate();
+      cleanup();
+    }
+  });
+
+  it('waits for idle, not just stale, before falling back and recovers immediately', t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const { input, sample, subscribers, cleanup } = inputFixture();
+    try {
+      input.syncSubscription({ correctForMastHeel: true });
+      sample('navigation.attitude.roll', 0.1);
+      sample('navigation.attitude.pitch', 0.2);
+      t.mock.timers.tick(4001);
+      assert.equal(input.ready, false);
+      assert.deepEqual(input.value, {});
+      assert.equal(subscribers.has('navigation.attitude'), false);
+      t.mock.timers.tick(55998);
+      assert.equal(subscribers.has('navigation.attitude'), false);
+      t.mock.timers.tick(1);
+      assert.equal(subscribers.get('navigation.attitude').size, 1);
+      sample('navigation.attitude', { roll: 1, pitch: 2 });
+      assert.deepEqual(input.value, { roll: 1, pitch: 2 });
+      sample('navigation.attitude.roll', 0.3);
+      assert.equal(input.value.roll, 0.3, 'primary smoother must not inherit the legacy estimate');
+      assert.equal(input.value.pitch, 2);
+      sample('navigation.attitude.pitch', 0.4);
+      assert.deepEqual(input.value, { roll: 0.3, pitch: 0.4 });
+      assert.equal(subscribers.get('navigation.attitude').size, 0);
+    } finally {
+      input.terminate();
+      cleanup();
+    }
+  });
+
+  it('does not revive missing legacy components through updates to another component', t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const { input, sample, cleanup } = inputFixture();
+    try {
+      input.syncSubscription({ correctForMastHeel: true });
+      t.mock.timers.tick(60000);
+      sample('navigation.attitude', { roll: 0.1, pitch: 0.2 });
+      for (let i = 0; i < 5; i++) {
+        t.mock.timers.tick(1000);
+        sample('navigation.attitude', { roll: 0.1 });
+      }
+      assert.deepEqual(input.value, { roll: 0.1 });
+      assert.equal(input.state.components.pitch.ready, false);
+      sample('navigation.attitude', { roll: null, pitch: null });
+      assert.deepEqual(input.value, {});
+      sample('navigation.attitude.roll', null);
+      sample('navigation.attitude.pitch', NaN);
+      assert.equal(input.ready, false);
+      sample('navigation.attitude.pitch', 0.3);
+      assert.deepEqual(input.value, { pitch: 0.3 });
+    } finally {
+      input.terminate();
+      cleanup();
+    }
+  });
+
+  it('starts on component paths, activates legacy on idle, and cleans up', t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const { app, cleanup, subscribers } = createCapturingShim();
+    const events = [];
+    const attitude = new AttitudeInput({
+      app, pluginId: 'AdvancedWind',
+      options: { attitudeSmootherClass: 'MovingAverageSmoother' },
+      onDelta: () => events.push('delta'),
+      onStale: () => events.push('stale'),
+      onIdle: () => events.push('idle'),
+      onDisabled: () => events.push('disabled')
+    });
+    try {
+      assert.equal(subscribers.size, 0, 'construction must not subscribe');
+      attitude.syncSubscription({});
+      assert.equal(subscribers.size, 0, 'disabled corrections must not subscribe');
+      assert.deepEqual(events, []);
+
+      attitude.syncSubscription({ correctForMastHeel: true });
+      assert.deepEqual([...subscribers.keys()], ['navigation.attitude.roll', 'navigation.attitude.pitch']);
+      assert.equal(attitude.ready, false);
+      t.mock.timers.tick(59999);
+      assert.equal(subscribers.has('navigation.attitude'), false);
+      t.mock.timers.tick(1);
+      assert.equal(subscribers.get('navigation.attitude').size, 1);
+      events.length = 0;
+      deliverDelta(subscribers, [{ path: 'navigation.attitude', value: { roll: 0.1, pitch: 0.2 } }]);
+      assert.deepEqual(attitude.value, { roll: 0.1, pitch: 0.2 });
+      assert.equal(attitude.ready, true);
+
+      t.mock.timers.tick(4001);
+      assert.equal(attitude.stale, true);
+      assert.equal(attitude.ready, false);
+      assert.equal(events.at(-1), 'stale');
+      t.mock.timers.tick(60000);
+      assert.equal(events.at(-1), 'idle');
+      assert.equal(subscribers.get('navigation.attitude').size, 1, 'silence must not detach the input');
+
+      deliverDelta(subscribers, [{ path: 'navigation.attitude', value: { roll: 0.3 } }]);
+      assert.equal(attitude.ready, true);
+      assert.equal(attitude.stale, false);
+      attitude.syncSubscription({});
+      assert.equal(subscribers.get('navigation.attitude').size, 0);
+      assert.equal(attitude.state.subscribed, false);
+      assert.equal(events.at(-1), 'disabled');
+
+      attitude.syncSubscription({ correctForMastMovement: true });
+      assert.equal(subscribers.get('navigation.attitude').size, 0);
+      assert.equal(subscribers.get('navigation.attitude.roll').size, 1);
+      assert.equal(attitude.terminate(), null);
+      assert.equal(subscribers.get('navigation.attitude').size, 0);
+      const eventCount = events.length;
+      t.mock.timers.tick(120000);
+      assert.equal(events.length, eventCount, 'termination must clear callbacks and timers');
+    } finally {
+      attitude.terminate();
+      cleanup();
+    }
+  });
+
+  it('preserves legacy smoothing values and variance while reporting selected components', t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const { app, cleanup, subscribers } = createCapturingShim();
+    const attitude = new AttitudeInput({
+      app, pluginId: 'AdvancedWind',
+      options: { attitudeSmootherClass: 'MovingAverageSmoother' },
+      onDisabled: () => {}
+    });
+    const reference = createSmoothedHandler({
+      app, pluginId: 'AdvancedWind', id: 'attitude', path: 'navigation.attitude',
+      subscribe: false, SmootherClass: MovingAverageSmoother, smootherOptions: { timeSpan: 1 }
+    });
+    try {
+      attitude.syncSubscription({ correctForMastHeel: true });
+      t.mock.timers.tick(60000);
+      reference.subscribe();
+      const configurations = [
+        ['MovingAverageSmoother', MovingAverageSmoother, { timeSpan: 2 }, { attitudeSmootherTimeSpan: 2 }],
+        ['ExponentialSmoother', ExponentialSmoother, { tau: 2 }, { attitudeSmootherTau: 2 }],
+        ['KalmanSmoother', KalmanSmoother, { steadyState: 0.3 }, { attitudeSmootherSteadyState: 0.3 }]
+      ];
+      for (const [name, SmootherClass, smootherOptions, options] of configurations) {
+        attitude.configureSmoother({ attitudeSmootherClass: name, ...options });
+        reference.setSmootherOptions(smootherOptions);
+        reference.setSmootherClass(SmootherClass);
+        for (const value of [
+          { roll: 0.1, pitch: 0.02, yaw: 1 },
+          { roll: 0.2, pitch: 0.04, yaw: 1.1 },
+          { roll: 0.3 }
+        ]) {
+          t.mock.timers.tick(100);
+          deliverDelta(subscribers, [{ path: 'navigation.attitude', value }]);
+          assert.deepEqual(attitude.value, { roll: reference.value.roll, pitch: reference.value.pitch }, name);
+          assert.deepEqual(attitude.report().variance, {
+            roll: reference.variance.roll, pitch: reference.variance.pitch
+          }, name);
+          assert.deepEqual(attitude.meta.smoother, reference.meta.smoother, name);
+          assert.equal(attitude.state.components.roll.selectedPath, 'navigation.attitude');
+          assert.equal(attitude.id, reference.id);
+          assert.equal(attitude.path, 'navigation.attitude');
+        }
+      }
+    } finally {
+      attitude.terminate();
+      reference.terminate();
+      cleanup();
+    }
+  });
+
+  it('applies correction toggles and smoother changes without wind and resets motion history', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const { app, cleanup, subscribers } = createCapturingShim({
+      attitudeSmootherClass: 'MovingAverageSmoother', heightAboveWater: 10
+    });
+    const plugin = createTestPlugin(app);
+    const routes = { get: {}, put: {} };
+    plugin.registerWithRouter({
+      get: (p, cb) => { routes.get[p] = cb; },
+      put: (p, cb) => { routes.put[p] = cb; }
+    });
+    const call = (method, p, body) => {
+      let payload;
+      routes[method][p]({ body }, { json: value => { payload = value; } });
+      return payload;
+    };
+    const report = () => call('get', '/report');
+    const settings = body => call('put', '/settings', body);
+    const sample = roll => {
+      deliverDelta(subscribers, [{ path: 'navigation.attitude.roll', value: roll }]);
+      deliverDelta(subscribers, [{ path: 'navigation.attitude.pitch', value: 0.02 }]);
+    };
+    try {
+      plugin.start();
+      assert.equal(subscribers.has('navigation.attitude'), false);
+      settings({ correctForMastMovement: true });
+      assert.equal(subscribers.get('navigation.attitude.roll').size, 1);
+      sample(0.1);
+      t.mock.timers.tick(100);
+      sample(0.2);
+      assert.equal(report().polars.sensorSpeed.state.ready, true);
+      const previousSpeed = report().polars.sensorSpeed.y;
+
+      settings({ attitudeSmootherClass: 'ExponentialSmoother', attitudeSmootherTau: 2 });
+      assert.deepEqual(call('get', '/meta').attitudes['attitude.smoothed'].smoother, {
+        type: 'ExponentialSmoother', tau: 2
+      });
+      t.mock.timers.tick(100);
+      sample(0.3);
+      assert.equal(report().polars.sensorSpeed.y, previousSpeed, 'first sample after reset must not differentiate');
+
+      t.mock.timers.tick(60001);
+      assert.ok(report().lifecycleWarnings.some(w => w.id === 'attitude.smoothed'));
+      settings({ correctForMastMovement: false });
+      assert.equal(subscribers.get('navigation.attitude').size, 0);
+      assert.equal(report().polars.sensorSpeed.state.ready, false);
+      assert.equal(report().lifecycleWarnings.some(w => w.id === 'attitude.smoothed'), false);
+
+      settings({ correctForMastHeel: true });
+      sample(0.8);
+      assert.equal(report().polars.sensorSpeed.state.ready, false, 're-enabled input must seed a new derivative');
+      assert.equal(report().attitudes['attitude.smoothed'].state.ready, true);
+      assert.equal(subscribers.has('navigation.attitude.yaw'), false);
+      await plugin.stop();
+      assert.equal(subscribers.get('navigation.attitude').size, 0);
+    } finally {
+      await plugin.stop();
+      cleanup();
+    }
+  });
+});
+
 describe('attitude guard clauses (missing spec sub-property)', () => {
   it('mast heel correction skips only the missing axis instead of producing NaN', async () => {
     const { app, cleanup, subscribers, sentDeltas } = createCapturingShim({
@@ -804,7 +1156,7 @@ describe('attitude guard clauses (missing spec sub-property)', () => {
       plugin.start();
 
       // Attitude delta missing pitch — only roll is present.
-      deliverDelta(subscribers, [{ path: 'navigation.attitude', value: { roll: 0.1 } }]);
+      deliverDelta(subscribers, [{ path: 'navigation.attitude.roll', value: 0.1 }]);
       deliverDelta(subscribers, [
         { path: 'environment.wind.speedApparent', value: 5.0 },
         { path: 'environment.wind.angleApparent', value: 0.5 },
@@ -884,7 +1236,7 @@ describe('initialization order (subscription race)', () => {
     }
   });
 
-  const cachedAttitude = { 'navigation.attitude': { roll: 0.1, pitch: 0.02, yaw: 1.0 } };
+  const cachedAttitude = { 'navigation.attitude.roll': 0.1, 'navigation.attitude.pitch': 0.02 };
 
   function captureRoutes(plugin) {
     const routes = { get: {}, put: {} };
@@ -903,6 +1255,45 @@ describe('initialization order (subscription race)', () => {
       report: () => call('get', '/report'),
     };
   }
+
+  it('accepts cached legacy values only after idle and resets motion history on primary recovery', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+    const { app, cleanup, subscribers } = createSyncBootstrapShim({
+      correctForMastMovement: true, heightAboveWater: 10
+    }, { 'navigation.attitude': { roll: 0.1, pitch: 0.02 } });
+    const plugin = createTestPlugin(app);
+    const api = captureRoutes(plugin);
+    const sample = (path, value) => deliverDelta(subscribers, [{ path, value }]);
+    try {
+      plugin.start();
+      assert.equal(api.report().attitudes['attitude.smoothed'].state.ready, false);
+      assert.equal(subscribers.has('navigation.attitude'), false);
+      t.mock.timers.tick(60000);
+      assert.deepEqual(api.report().attitudes['attitude.smoothed'].value, { roll: 0.1, pitch: 0.02 });
+      assert.equal(api.report().polars.sensorSpeed.state.ready, false);
+      t.mock.timers.tick(100);
+      sample('navigation.attitude', { roll: 0.2, pitch: 0.02 });
+      assert.equal(api.report().polars.sensorSpeed.state.ready, true);
+
+      t.mock.timers.tick(100);
+      sample('navigation.attitude.roll', 1);
+      sample('navigation.attitude.pitch', 1);
+      assert.equal(api.report().polars.sensorSpeed.state.ready, false, 'source discontinuities must not become motion');
+      assert.equal(subscribers.get('navigation.attitude').size, 0);
+
+      t.mock.timers.tick(100);
+      sample('navigation.attitude.roll', 1);
+      sample('navigation.attitude.pitch', 1);
+      const speed = api.report().polars.sensorSpeed;
+      assert.equal(speed.state.ready, true);
+      assert.equal(speed.x, 0);
+      assert.equal(speed.y, 0);
+      assert.equal(api.report().attitudes['attitude.smoothed'].state.components.roll.selectedPath, 'navigation.attitude.roll');
+    } finally {
+      await plugin.stop();
+      cleanup();
+    }
+  });
 
   it('does not throw when attitude delivers synchronously during subscribe with mast heel correction enabled', async () => {
     const { app, cleanup } = createSyncBootstrapShim({ correctForMastHeel: true }, cachedAttitude);
@@ -932,7 +1323,8 @@ describe('initialization order (subscription race)', () => {
       assert.equal(api.report().polars.sensorSpeed.state.ready, false, 'one sample must not produce a sensor speed');
 
       t.mock.timers.tick(100);
-      deliverDelta(subscribers, [{ path: 'navigation.attitude', value: { roll: 0.2, pitch: 0.02, yaw: 1.0 } }]);
+      deliverDelta(subscribers, [{ path: 'navigation.attitude.roll', value: 0.2 }]);
+      deliverDelta(subscribers, [{ path: 'navigation.attitude.pitch', value: 0.02 }]);
 
       const report = api.report();
       const smoothed = report.attitudes['attitude.smoothed'].value;

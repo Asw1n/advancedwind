@@ -66,6 +66,19 @@ The steps, in calculation order, are:
 
 All corrections are disabled by default. Enable only those that apply to your boat and that you can supply the required data for.
 
+When mast heel or mast movement correction is enabled, attitude input handling in
+`attitude.js` prefers `navigation.attitude.roll` and `navigation.attitude.pitch`.
+Yaw is not subscribed to. If either component is idle for 60 seconds (including
+when no data has arrived since startup), the plugin subscribes to the legacy
+`navigation.attitude` object for that component. Stale values are not used while
+waiting. Each component switches back as soon as valid new-path data resumes;
+the legacy subscription is removed when neither component needs it.
+Smoothing settings and degree display are unchanged. Motion history is reset on
+input-path changes to prevent artificial mast-motion spikes. The attitude report
+includes each component's selected path and fallback status under `state.components`.
+Debug logging shows the initial preference and each component's source changes
+(individual path, legacy object, or unavailable), without logging every sample.
+
 ### Sensor misalignment
 The wind vane and wind sensor are rarely mounted perfectly in line with the boat's centreline. This correction subtracts a fixed offset angle from the sensor reading. Set the misalignment angle in the webapp.
 
