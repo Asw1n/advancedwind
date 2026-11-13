@@ -1,4 +1,5 @@
 const { Polar, PolarSmoother, SmoothedAngle, Reporter, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother, PassThroughSmoother, MessageSmoother, MessageHandler, createSmoothedPolar, createSmoothedHandler } = require('signalkutilities');
+const { AttitudeInput, ATTITUDE_SMOOTHER_KEYS } = require('./attitude');
 
 module.exports = function (app) {
   const currentVersion = "3.4";
@@ -380,16 +381,6 @@ module.exports = function (app) {
     }
   }
 
-  function buildAttitudeSmootherOptions(opts) {
-    switch (opts.attitudeSmootherClass || 'MovingAverageSmoother') {
-      case 'ExponentialSmoother': return { tau: opts.attitudeSmootherTau ?? 1 };
-      case 'PassThroughSmoother': return {};
-      case 'KalmanSmoother': return { steadyState: opts.attitudeSmootherSteadyState ?? 0.2 };
-      case 'MovingAverageSmoother':
-      default: return { timeSpan: opts.attitudeSmootherTimeSpan ?? 1 };
-    }
-  }
-
   function buildWindShiftFastOptions(opts) {
     switch (opts.windShiftFastClass || 'ExponentialSmoother') {
       case 'ExponentialSmoother': return { tau: opts.windShiftFastTau ?? 30 };
@@ -482,7 +473,6 @@ module.exports = function (app) {
       onStale: mastLifecycle.onStale,
     });
 
-    const shouldSubscribeAttitude = () => !!(options.correctForMastHeel || options.correctForMastMovement);
     const shouldSubscribeLeeway = () => !!options.correctForLeeway;
 
     // NOTE: these declarations must precede the attitude subscription below. A subscription can
@@ -504,25 +494,16 @@ module.exports = function (app) {
     // attPrevious only advances when we actually compute, so the full angular
     // change since the last accepted sample is always used.
     const MIN_ATT_INTERVAL = 50;
-    // Keys that trigger an attitude smoother reset.
-    const ATTITUDE_SMOOTHER_KEYS = ['attitudeSmootherClass', 'attitudeSmootherTau', 'attitudeSmootherTimeSpan', 'attitudeSmootherSteadyState'];
     const isReadyAndFresh = (input) => !!input && input.ready === true && !input.stale;
 
-    //attitude (subscribe only when mast heel or mast movement correction is enabled)
-    // Constructed unsubscribed and subscribed only after `attitude` and `sensorSpeed`
-    // are assigned, because onDelta uses both and may run synchronously during subscribe().
     const attitudeLifecycle = buildLifecycleCallbacks(
       'attitude.smoothed',
-      () => attitude?.handler?.path || 'navigation.attitude'
+      () => attitude?.path || 'navigation.attitude'
     );
-    attitude = createSmoothedHandler({
-      id: "attitude",
-      path: "navigation.attitude",
-      subscribe: false,
+    attitude = new AttitudeInput({
       app,
       pluginId: plugin.id,
-      SmootherClass: resolveSmootherClass(options.attitudeSmootherClass),
-      smootherOptions: buildAttitudeSmootherOptions(options),
+      options,
       onDelta: () => {
         attitudeLifecycle.onDelta();
         // Apply attitude smoother settings eagerly — don't wait for calculate() (wind data).
@@ -531,8 +512,7 @@ module.exports = function (app) {
           for (const k of ATTITUDE_SMOOTHER_KEYS) {
             if (k in changedOptions) { options[k] = changedOptions[k]; delete changedOptions[k]; }
           }
-          attitude.setSmootherOptions(buildAttitudeSmootherOptions(options));
-          attitude.setSmootherClass(resolveSmootherClass(options.attitudeSmootherClass));
+          attitude.configureSmoother(options);
           saveOptions();
           attLastTime = null;
           attPrevious = null;
@@ -563,12 +543,23 @@ module.exports = function (app) {
       },
       onIdle: attitudeLifecycle.onIdle,
       onStale: attitudeLifecycle.onStale,
+      onSourceChange: () => {
+        attLastTime = null;
+        attPrevious = null;
+        sensorSpeed?.invalidate?.();
+      },
+      onDisabled: () => {
+        clearLifecycleWarning('attitude.smoothed');
+        attLastTime = null;
+        attPrevious = null;
+        sensorSpeed?.invalidate?.();
+      },
     });
     sensorSpeed = new Polar(app, plugin.id, "sensorSpeed");
     sensorSpeed.setMeta({ displayName: "Speed of sensor", plane: "Boat" });
     sensorSpeed.configureMagnitude("environment.wind.speedApparent");
     sensorSpeed.configureAngle("environment.wind.angleApparent");
-    if (shouldSubscribeAttitude()) attitude.subscribe();
+    attitude.syncSubscription(options);
 
     // Snapshot polars for per-step before/after inspection
     misalignIn = new Polar(app, plugin.id, "misalignIn"); misalignIn.setMeta({ displayName: "Before misalignment", plane: "Boat" });
@@ -1070,8 +1061,7 @@ module.exports = function (app) {
         // Attitude has its own smoother settings.
         // Also reset derivative state so the discontinuity does not produce a spike.
         if (attitude) {
-          attitude.setSmootherOptions(buildAttitudeSmootherOptions(options));
-          attitude.setSmootherClass(resolveSmootherClass(options.attitudeSmootherClass));
+          attitude.configureSmoother(options);
           attLastTime = null;
           attPrevious = null;
         }
@@ -1089,15 +1079,7 @@ module.exports = function (app) {
       }
 
       if (needsAttitudeSubscriptionSync && attitude) {
-        if (shouldSubscribeAttitude()) {
-          attitude.subscribe();
-        } else {
-          attitude.unsubscribe();
-          clearLifecycleWarning('attitude.smoothed');
-          attLastTime = null;
-          attPrevious = null;
-          sensorSpeed?.invalidate?.();
-        }
+        attitude.syncSubscription(options);
       }
 
       if (needsLeewaySubscriptionSync && leewayHandler) {

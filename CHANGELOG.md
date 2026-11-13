@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
+## Unreleased
+
+### Added
+- Mast heel and mast movement corrections now prefer the individual roll and pitch paths, with automatic fallback to the legacy attitude object after 60 seconds of silence and automatic recovery when individual values return.
+- Attitude reports identify the selected path for each component, and debug logging shows initial source preferences and changes.
+
 ## [2.10.0] - 2026-10-26
 
 ### Changed
